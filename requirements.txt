@@ -1,0 +1,4 @@
+aiohttp>=3.9,<4
+grpcio>=1.60
+requests>=2.31
+qrcode>=7.4
