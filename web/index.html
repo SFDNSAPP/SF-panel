@@ -1,1 +1,419 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#070b14">
+<title>SF-Panel</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%236366f1'/%3E%3Ctext x='32' y='43' font-size='24' font-family='monospace' font-weight='bold' fill='#fff' text-anchor='middle'%3ESF%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
 
+<!-- ═══════════════════ صفحه ورود / نصب ═══════════════════ -->
+<div id="authWrap" class="auth-wrap">
+  <div class="auth-card">
+    <div class="brand">
+      <div class="mark">SF</div>
+      <div>
+        <h1>SF-Panel</h1>
+        <small id="authBrandSub">در حال بررسی وضعیت…</small>
+      </div>
+    </div>
+
+    <!-- ورود -->
+    <div id="loginForm" class="hidden">
+      <div class="f">
+        <label>نام کاربری</label>
+        <input id="authUser" autocomplete="username" spellcheck="false">
+      </div>
+      <div class="f">
+        <label>رمز عبور</label>
+        <input id="authPass" type="password" autocomplete="current-password">
+      </div>
+      <div class="f hidden" id="totpField">
+        <label>کد دومرحله‌ای</label>
+        <input id="authCode" class="ltr" inputmode="numeric" maxlength="6"
+               placeholder="------" autocomplete="one-time-code">
+      </div>
+      <div class="err" id="authErr"></div>
+      <button class="btn btn-pri btn-block" id="authBtn">ورود به پنل</button>
+    </div>
+
+    <!-- نصب اولیه -->
+    <div id="setupForm" class="hidden">
+      <div class="f">
+        <label>نام کاربری مدیر</label>
+        <input id="setupUser" autocomplete="username" spellcheck="false">
+      </div>
+      <div class="f">
+        <label>رمز عبور (حداقل ۶ کاراکتر)</label>
+        <input id="setupPass" type="password" autocomplete="new-password">
+      </div>
+      <div class="f">
+        <label>تکرار رمز عبور</label>
+        <input id="setupPass2" type="password" autocomplete="new-password">
+      </div>
+      <div class="err" id="setupErr"></div>
+      <button class="btn btn-pri btn-block" id="setupBtn">نصب پنل</button>
+    </div>
+
+    <div class="auth-foot">
+      <span id="authXrayState" class="pill"><span class="dot"></span> Xray</span>
+      <span class="ver">v<span id="authVer">—</span></span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ اسکلت اصلی ═══════════════════ -->
+<div id="appWrap" class="app hidden">
+
+  <!-- سایدبار -->
+  <aside id="sidebar" class="sidebar">
+    <div class="brand">
+      <div class="mark">SF</div>
+      <div><b>SF-Panel</b><div class="v">v<span id="verTag">—</span></div></div>
+    </div>
+    <nav id="nav">
+      <div class="nav-item active" data-view="dashboard"><span class="ic">📊</span> داشبورد</div>
+      <div class="nav-item" data-view="inbounds"><span class="ic">📡</span> اینباند‌ها</div>
+      <div class="nav-item" data-view="clients"><span class="ic">👥</span> کاربران</div>
+      <div class="nav-item" data-view="settings"><span class="ic">⚙️</span> تنظیمات</div>
+      <div class="nav-item" data-view="xray"><span class="ic">🧠</span> هسته Xray</div>
+      <div class="nav-item" data-view="logs"><span class="ic">📜</span> لاگ‌ها</div>
+    </nav>
+    <div class="side-foot">
+      <span class="muted">مدیریت Xray</span>
+      <button class="btn-icon" id="logoutBtn" title="خروج">⏻</button>
+    </div>
+  </aside>
+
+  <!-- بخش اصلی -->
+  <div class="main">
+    <header class="topbar">
+      <button class="btn-icon only-mobile" id="mobileMenu" title="منو">☰</button>
+      <div class="titles">
+        <h1 id="viewTitle">داشبورد</h1>
+        <div class="sub" id="viewSub"></div>
+      </div>
+      <div class="top-actions">
+        <div id="modePill" class="pill">—</div>
+        <div id="xrayPill" class="pill bad"><span class="dot"></span> Xray</div>
+      </div>
+    </header>
+
+    <main id="view">
+
+      <!-- ── داشبورد ── -->
+      <section id="view-dashboard" class="view">
+        <div class="grid g4">
+          <div class="card stat">
+            <div class="lbl">🖥 پردازنده</div>
+            <div class="val" id="stCpu">—</div>
+            <div class="prog"><i id="stCpuBar" style="width:0%"></i></div>
+          </div>
+          <div class="card stat">
+            <div class="lbl">💾 حافظه</div>
+            <div class="val" id="stMem">—</div>
+            <div class="prog"><i id="stMemBar" style="width:0%"></i></div>
+            <div class="sub" id="stMemSub">—</div>
+          </div>
+          <div class="card stat">
+            <div class="lbl">🗄 دیسک</div>
+            <div class="val" id="stDisk">—</div>
+            <div class="prog"><i id="stDiskBar" style="width:0%"></i></div>
+            <div class="sub" id="stDiskSub">—</div>
+          </div>
+          <div class="card stat">
+            <div class="lbl">🌐 شبکه (لحظه‌ای)</div>
+            <div class="val" id="stNet">—</div>
+            <div class="sub" id="stNetSub">↑ — &nbsp; ↓ —</div>
+          </div>
+        </div>
+
+        <div class="grid g4 chips-row">
+          <div class="chip"><span>مصرف امروز</span><b id="stToday">—</b></div>
+          <div class="chip"><span>ترافیک کل کاربران</span><b id="stTotal">—</b></div>
+          <div class="chip"><span>کاربران (فعال/کل)</span><b id="stClients">—</b></div>
+          <div class="chip"><span>اتصالات زنده</span><b id="stConns">—</b></div>
+        </div>
+
+        <div class="g-main">
+          <div class="card">
+            <h3>📈 ترافیک زنده</h3>
+            <canvas id="chart" height="180"></canvas>
+            <div class="legend">
+              <span><i class="lg lg-up"></i> آپلود</span>
+              <span><i class="lg lg-down"></i> دانلود</span>
+            </div>
+          </div>
+          <div class="card">
+            <h3>⚙️ هسته Xray</h3>
+            <div id="xrayState" class="pill bad"><span class="dot"></span> بررسی…</div>
+            <div class="kv"><span>نسخه</span><b id="xrayVer">—</b></div>
+            <div class="kv"><span>آپتایم</span><b id="xrayUptime">—</b></div>
+            <div class="kv"><span>ری‌استارت‌ها</span><b id="xrayRestarts">—</b></div>
+            <button class="btn btn-pri btn-block" id="btnXrayRestart2">🔄 راه‌اندازی مجدد</button>
+          </div>
+        </div>
+
+        <div class="g-main" style="margin-top:16px">
+          <div class="card">
+            <h3>🏆 بیشترین مصرف</h3>
+            <div class="tbl-wrap">
+              <table>
+                <thead><tr><th>کاربر</th><th>مصرف</th><th>وضعیت</th></tr></thead>
+                <tbody id="topUsers"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <h3>🔔 رویدادهای اخیر</h3>
+            <ul id="dashEvents" class="events"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── اینباند‌ها ── -->
+      <section id="view-inbounds" class="view hidden">
+        <div class="toolbar">
+          <button class="btn btn-pri" id="btnAddInbound">＋ اینباند جدید</button>
+          <input id="inboundSearch" class="search" placeholder="جستجو در نام‌ها…">
+          <span class="muted" id="inboundsCount"></span>
+        </div>
+        <div class="card">
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr><th>وضعیت</th><th>نام</th><th>پروتکل</th>
+                    <th>جزئیات اتصال</th><th>کاربران</th><th>ترافیک</th><th>عملیات</th></tr>
+              </thead>
+              <tbody id="inboundsTbody"></tbody>
+            </table>
+          </div>
+          <div id="inboundsEmpty" class="empty hidden">
+            <div class="big">📡</div>هنوز اینباندی نساخته‌ای
+          </div>
+        </div>
+      </section>
+
+      <!-- ── کاربران ── -->
+      <section id="view-clients" class="view hidden">
+        <div class="toolbar">
+          <button class="btn btn-pri" id="btnAddClient">＋ کاربر جدید</button>
+          <input id="clientSearch" class="search" placeholder="جستجو در کاربران…">
+          <span class="muted" id="clientsCount"></span>
+        </div>
+        <div class="card">
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr><th>وضعیت</th><th>کاربر</th><th>اینباند‌ها</th>
+                    <th>مصرف</th><th>محدودیت</th><th>اعتبار</th><th>عملیات</th></tr>
+              </thead>
+              <tbody id="clientsTbody"></tbody>
+            </table>
+          </div>
+          <div id="clientsEmpty" class="empty hidden">
+            <div class="big">👥</div>هنوز کاربری نساخته‌ای
+          </div>
+        </div>
+      </section>
+
+      <!-- ── تنظیمات ── -->
+      <section id="view-settings" class="view hidden">
+        <div class="grid g2">
+          <div class="card">
+            <h3>🌐 عمومی</h3>
+            <div class="f">
+              <label>دامنه / آدرس عمومی</label>
+              <input id="setDomain" class="ltr" placeholder="panel.example.com">
+              <div class="hint">در حالت ابری، دامنه Railway/Render را وارد کنید.
+              خالی = خودکار از درخواست تشخیص داده می‌شود.</div>
+            </div>
+            <div class="f">
+              <label>عنوان اشتراک (Subscription)</label>
+              <input id="setSubTitle" placeholder="SF-Panel">
+            </div>
+            <button class="btn btn-pri" id="btnSaveGeneral">💾 ذخیره</button>
+          </div>
+
+          <div class="card">
+            <h3>🔑 رمز عبور</h3>
+            <div class="f"><label>رمز فعلی</label>
+              <input id="passOld" type="password" autocomplete="current-password"></div>
+            <div class="f"><label>رمز جدید (حداقل ۶)</label>
+              <input id="passNew" type="password" autocomplete="new-password"></div>
+            <button class="btn btn-pri" id="btnChangePass">تغییر رمز</button>
+            <div class="hint">پس از تغییر، همه نشست‌ها باطل می‌شوند و دوباره وارد
+            می‌شوی (توکن جدید خودکار ذخیره می‌شود).</div>
+          </div>
+
+          <div class="card">
+            <h3>🔐 ورود دومرحله‌ای (TOTP)</h3>
+            <div id="totpStatus" class="pill"><span class="dot"></span> غیرفعال</div>
+            <div class="row" style="margin:12px 0">
+              <button class="btn" id="btnTotpSetup">🔑 راه‌اندازی 2FA</button>
+            </div>
+            <div id="totpSetupBox" class="hidden">
+              <div class="hint">این کلید را در Google Authenticator /
+              Aegis وارد کن:</div>
+              <div class="copybox mono" id="totpSecret">—</div>
+              <div id="totpQr" class="qr-slot"></div>
+              <div class="f">
+                <label>کد ۶ رقمی اپ را وارد کن</label>
+                <input id="totpCode" class="ltr" inputmode="numeric" maxlength="6">
+              </div>
+              <button class="btn btn-pri" id="btnTotpEnable">✅ فعال‌سازی</button>
+            </div>
+            <div id="totpDisableBox" class="hidden" style="margin-top:12px">
+              <div class="f">
+                <label>رمز عبور (برای غیرفعال‌سازی)</label>
+                <input id="totpDisablePass" type="password">
+              </div>
+              <button class="btn btn-bad" id="btnTotpDisable">غیرفعال‌سازی 2FA</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>🤖 ربات تلگرام</h3>
+            <div class="f"><label>توکن ربات (از @BotFather)</label>
+              <input id="setTgToken" class="ltr" placeholder="123456:ABC-DEF..."></div>
+            <div class="f"><label>شناسه‌های ادمین (با کاما)</label>
+              <input id="setTgAdmins" class="ltr" placeholder="123456789, 987654321">
+              <div class="hint">شناسه خودت را از /start ربات بگیر.</div></div>
+            <div class="f sw-row">
+              <label class="sw"><input type="checkbox" id="setTgNotify"><span></span></label>
+              <span>اعلان خودکار حجم/انقضا به کاربران</span>
+            </div>
+            <div class="row">
+              <button class="btn btn-pri" id="btnSaveTg">💾 ذخیره</button>
+              <button class="btn" id="btnTgTest">🔌 تست اتصال</button>
+            </div>
+            <div class="hint" id="tgTestResult"></div>
+          </div>
+
+          <div class="card">
+            <h3>♻️ ریست دوره‌ای مصرف</h3>
+            <div class="f"><label>حالت</label>
+              <select id="setResetMode">
+                <option value="off">غیرفعال</option>
+                <option value="daily">روزانه (هر روز UTC)</option>
+                <option value="monthly">ماهانه</option>
+              </select></div>
+            <div class="f"><label>روز ریست ماهانه (۱ تا ۲۸)</label>
+              <input id="setResetDay" type="number" min="1" max="28" value="1"></div>
+            <button class="btn btn-pri" id="btnSaveReset">💾 ذخیره</button>
+            <div class="hint">در روز انتخابی، مصرف «همه» کاربران صفر می‌شود
+            (محدودیت‌ها تغییر نمی‌کنند).</div>
+          </div>
+
+          <div class="card">
+            <h3>📦 پشتیبان‌گیری</h3>
+            <button class="btn btn-pri" id="btnBackup">⬇️ دانلود پشتیبان JSON</button>
+            <div class="f" style="margin-top:14px">
+              <label>بازیابی از فایل</label>
+              <input id="restoreFile" type="file" accept=".json,application/json">
+            </div>
+            <button class="btn btn-bad" id="btnRestore">⬆️ بازیابی</button>
+            <div class="hint">⚠️ بازیابی اینباند/کاربران فعلی را جایگزین می‌کند.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── هسته Xray ── -->
+      <section id="view-xray" class="view hidden">
+        <div class="grid g2">
+          <div class="card">
+            <h3>⚙️ وضعیت هسته</h3>
+            <div id="xray2State" class="pill bad"><span class="dot"></span> بررسی…</div>
+            <div class="kv"><span>نسخه</span><b id="xray2Ver">—</b></div>
+            <div class="kv"><span>آپتایم</span><b id="xray2Uptime">—</b></div>
+            <div class="kv"><span>Goroutines</span><b id="xray2Goro">—</b></div>
+            <div class="kv"><span>حافظه هسته</span><b id="xray2Alloc">—</b></div>
+            <div class="f" style="margin-top:12px">
+              <label>نسخه دلخواه (خالی = آخرین نسخه)</label>
+              <input id="setXrayVersion" class="ltr" placeholder="مثلاً v25.1.1">
+            </div>
+            <div class="row">
+              <button class="btn" id="btnSaveXrayVer">💾 ذخیره نسخه</button>
+            </div>
+            <div class="row" style="margin-top:12px">
+              <button class="btn btn-pri" id="btnXrayRestart">🔄 راه‌اندازی مجدد</button>
+              <button class="btn" id="btnXrayUpdate">⬆️ بروزرسانی هسته</button>
+            </div>
+            <div id="xray2ErrBox" class="errbox hidden">
+              <pre id="xray2ErrText" class="mono"></pre>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>🧰 ابزارهای امنیتی</h3>
+            <div class="lbl2">تولید کلید Reality (x25519)</div>
+            <button class="btn" id="btnXrayKeys">🔑 تولید کلید</button>
+            <div id="x25519Box" class="copybox mono hidden">—</div>
+            <div class="lbl2" style="margin-top:18px">گواهی خودامضا (TLS)</div>
+            <div class="f">
+              <input id="certDomain" class="ltr" placeholder="دامنه — خالی = خودکار">
+            </div>
+            <button class="btn" id="btnGenCert">📜 ساخت گواهی ۱۰ ساله</button>
+            <div class="hint" id="certResult"></div>
+          </div>
+        </div>
+
+        <div class="card" id="routesCard" style="margin-top:16px">
+          <h3>🔀 مسیرهای روتر (حالت ابری)</h3>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr><th>مسیر پروکسی</th><th>پورت داخلی</th></tr></thead>
+              <tbody id="xrayRoutes"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <h3>ℹ️ حالت اجرا</h3>
+          <div class="hint" id="modeInfo">—</div>
+        </div>
+      </section>
+
+      <!-- ── لاگ‌ها ── -->
+      <section id="view-logs" class="view hidden">
+        <div class="toolbar">
+          <div class="seg">
+            <button class="seg-btn active" id="logTypePanel">پنل</button>
+            <button class="seg-btn" id="logTypeXray">Xray</button>
+          </div>
+          <button class="btn" id="btnRefreshLogs">🔄 بروزرسانی</button>
+        </div>
+        <div class="card">
+          <pre id="logBox" class="logbox mono">—</pre>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- ═══════════════════ مودال عمومی ═══════════════════ -->
+<div id="modalBack" class="modal-back hidden">
+  <div class="modal-card" id="modalCard">
+    <div class="modal-head">
+      <h3 id="modalTitle">عنوان</h3>
+      <button class="btn-icon" id="modalClose">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════ توست ═══════════════════ -->
+<div id="toastWrap" class="toasts"></div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>
