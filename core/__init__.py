@@ -1,1 +1,1 @@
-
+"""SF-Panel core package."""
