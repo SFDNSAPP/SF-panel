@@ -32,5 +32,4 @@ RUN case "$(dpkg --print-architecture)" in \
     unzip -o /tmp/x.zip xray geoip.dat geosite.dat -d /opt/xray && \
     rm /tmp/x.zip && chmod +x /opt/xray/xray
 
-VOLUME ["/data"]
 ENTRYPOINT ["./docker-entrypoint.sh"]
