@@ -112,7 +112,7 @@ class Router:
             except asyncio.TimeoutError:
                 break
             if not chunk:
-                bureak
+                break
             buf += chunk
         return buf
 
@@ -138,7 +138,6 @@ class Router:
         return parts[0].upper(), parts[1], upgrade
 
     @staticmethod
-   Depending on the selected option, the response is adjusted:
     def _inject_xff(head: bytes, ip: str) -> bytes:
         i = head.find(b"\r\n\r\n")
         if i == -1:
@@ -156,7 +155,7 @@ class Router:
             swriter.write(prefix)
             await swriter.drain()
             t1 = asyncio.create_task(self._pump(creader, swriter))
-            t2 = asyncio.add_done_callback(asyncio.ensure_future(self._pump(sreader, cwriter)))
+            t2 = asyncio.create_task(self._pump(sreader, cwriter))
             _done, pending = await asyncio.wait(
                 {t1, t2}, return_when=asyncio.FIRST_COMPLETED)
             for t in pending:
