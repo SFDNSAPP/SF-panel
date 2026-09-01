@@ -67,17 +67,26 @@ class XrayManager:
 
     # ---------------- مسیر اجرا (رفع noexec روی PaaS) ----------------
 
-    def exec_bin(self) -> str:
-        """باینری قابل اجرا — در PaaS کپی تازه در /tmp."""
+        def exec_bin(self) -> str:
+        """باینری قابل اجرا — در PaaS کپی تازه در /tmp (رفع noexec).
+        فایل‌های geo هم کنار باینری کپی می‌شوند (Xray همان‌جا می‌گردد)."""
         if EXEC_DIR is None:
             return cfg.XRAY_BIN
         target = os.path.join(EXEC_DIR, "xray")
         try:
+            os.makedirs(EXEC_DIR, exist_ok=True)
             if (not os.path.isfile(target)
                     or os.path.getmtime(target) < os.path.getmtime(cfg.XRAY_BIN)):
-                os.makedirs(EXEC_DIR, exist_ok=True)
                 shutil.copy2(cfg.XRAY_BIN, target)
                 os.chmod(target, 0o755)
+            for dat in ("geoip.dat", "geosite.dat"):
+                src = os.path.join(cfg.XRAY_DIR, dat)
+                dst = os.path.join(EXEC_DIR, dat)
+                if os.path.isfile(src) and not os.path.isfile(dst):
+                    try:
+                        shutil.copy2(src, dst)
+                    except Exception:
+                        pass
         except FileNotFoundError:
             return cfg.XRAY_BIN   # هنوز دانلود نشده — خطای شفاف برمی‌گردد
         return target
@@ -177,15 +186,19 @@ class XrayManager:
     def build_config(self) -> str:
         return ibld.build_full_config(cfg.PAAS)
 
-    def _spawn(self) -> bool:
+        def _spawn(self) -> bool:
         binp = cfg.XRAY_BIN
         try:
             binp = self.exec_bin()
+            env = os.environ.copy()
+            # فایل‌های geo روی volume هستند ولی باینری در /tmp اجرا می‌شود —
+            # با این متغیر Xray مسیر درست را می‌داند
+            env["XRAY_LOCATION_ASSET"] = cfg.XRAY_DIR
             self._logf = open(cfg.XRAY_LOG, "ab")
             self.proc = subprocess.Popen(
                 [binp, "run", "-c", cfg.XRAY_CFG],
                 stdout=self._logf, stderr=subprocess.STDOUT,
-                cwd=cfg.XRAY_DIR, **self._pflags())
+                cwd=cfg.XRAY_DIR, env=env, **self._pflags())
             return True
         except Exception as e:
             self.last_error = f"اجرای xray ناموفق ({binp}): {e}"
