@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
-"""روتر Layer-4 تک‌پورت (حالت ابری):
-HTTP عادی → پنل | WebSocket/httpupgrade با Path → اینباند Xray
+"""روتر Layer-4 تک‌پورت (حالت ابری) — ROUTER-V3-PASSTHROUGH
+HTTP عادی → پنل (بایت‌ها دست‌نخورده عبور می‌کنند)
+WebSocket/httpupgrade با Path → اینباند متناظر Xray
+IP واقعی از هدر X-Forwarded-For خود پلتفرم می‌آید (نیازی به تزریق نیست).
 """
 
 import asyncio
@@ -22,6 +24,8 @@ class Router:
         self.active = 0
         self.total_relayed = 0
 
+    # ---------------- مسیرها ----------------
+
     def refresh(self):
         routes = {}
         if cfg.PAAS:
@@ -35,12 +39,13 @@ class Router:
         self._routes = routes
 
     def route_for(self, path: str):
-        base = path.split("?", 1)[0]
-        return self._routes.get(base)
+        return self._routes.get(path.split("?", 1)[0])
 
     def routes_info(self):
         return [{"path": p, "internal_port": port}
                 for p, port in sorted(self._routes.items())]
+
+    # ---------------- سرویس ----------------
 
     async def serve(self, host="0.0.0.0", port=None):
         port = cfg.PUBLIC_PORT if port is None else port
@@ -52,16 +57,17 @@ class Router:
         async with self._server:
             await self._server.serve_forever()
 
+    # ---------------- هندلر ----------------
+
     async def _handle(self, reader, writer):
         self.active += 1
-        peer = writer.get_extra_info("peername")
-        peer_ip = peer[0] if peer else "?"
         try:
             head = await self._read_head(reader)
             if not head:
                 return
             parsed = self._parse(head)
             if parsed is None:
+                db.log_event("router: درخواست غیر-HTTP رد شد (400)", "warn")
                 await self._respond(writer, 400, b"SF-Router: Bad Request")
                 return
             _method, path, upgrade = parsed
@@ -72,8 +78,8 @@ class Router:
                     return
                 await self._relay(reader, writer, port, head)
             else:
-                await self._relay(reader, writer, self.panel_port,
-                                  self._inject_xff(head, peer_ip))
+                # ترافیک پنل — شفاف، بدون هیچ تغییری
+                await self._relay(reader, writer, self.panel_port, head)
         except (ConnectionError, asyncio.TimeoutError,
                 asyncio.IncompleteReadError, asyncio.LimitOverrunError):
             pass
@@ -85,6 +91,8 @@ class Router:
                 writer.close()
             except Exception:
                 pass
+
+    # ---------------- اجزا ----------------
 
     async def _read_head(self, reader):
         buf = b""
@@ -123,18 +131,13 @@ class Router:
                     upgrade = v.strip().lower()
         return parts[0].upper(), parts[1], upgrade
 
-    @staticmethod
-    def _inject_xff(head: bytes, ip: str) -> bytes:
-        i = head.find(b"\r\n\r\n")
-        if i == -1:
-            return head
-        return head[:i] + f"X-Forwarded-For: {ip}\r\n".encode() + head[i:]
-
     async def _relay(self, creader, cwriter, port, prefix):
         try:
             sreader, swriter = await asyncio.wait_for(
                 asyncio.open_connection("127.0.0.1", port), timeout=8)
         except Exception:
+            db.log_event(f"router: اتصال به پورت داخلی {port} ناموفق (502)",
+                         "err")
             await self._respond(cwriter, 502, b"SF-Router: Bad Gateway")
             return
         try:
