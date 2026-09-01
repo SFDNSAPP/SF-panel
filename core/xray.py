@@ -1,11 +1,18 @@
 # -*- coding: utf-8 -*-
-"""مدیریت هسته Xray — دانلود، اجرا، rollback خودکار، واچ‌داگ، ابزارها."""
+"""مدیریت هسته Xray — دانلود، اجرا، rollback خودکار، واچ‌داگ، ابزارها.
+
+⚠️ نکته PaaS (Railway/Render): volume ممکن است noexec مانت شود —
+نوشتن/خواندن مجاز است اما «اجرا»ی باینری از volume نه.
+راه‌حل: در حالت ابری هسته از /tmp اجرا می‌شود؛ کپی مبنا روی volume
+فقط کش است تا با ری‌استارت دوباره دانلود نشود.
+"""
 
 import os
 import platform
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import zipfile
@@ -16,6 +23,12 @@ from . import config as cfg
 from . import database as db
 from . import inbound_builder as ibld
 from .grpc_stats import XrayStatsClient
+
+# مسیر «اجرا»ی هسته:
+#   PaaS → /tmp/sf-xray-run/xray   (volume ممکن است noexec باشد)
+#   VPS  → همان cfg.XRAY_BIN
+EXEC_DIR = (os.path.join(tempfile.gettempdir(), "sf-xray-run")
+            if cfg.PAAS else None)
 
 
 class XrayManager:
@@ -51,6 +64,23 @@ class XrayManager:
     @staticmethod
     def _pflags():
         return {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+    # ---------------- مسیر اجرا (رفع noexec روی PaaS) ----------------
+
+    def exec_bin(self) -> str:
+        """باینری قابل اجرا — در PaaS کپی تازه در /tmp."""
+        if EXEC_DIR is None:
+            return cfg.XRAY_BIN
+        target = os.path.join(EXEC_DIR, "xray")
+        try:
+            if (not os.path.isfile(target)
+                    or os.path.getmtime(target) < os.path.getmtime(cfg.XRAY_BIN)):
+                os.makedirs(EXEC_DIR, exist_ok=True)
+                shutil.copy2(cfg.XRAY_BIN, target)
+                os.chmod(target, 0o755)
+        except FileNotFoundError:
+            return cfg.XRAY_BIN   # هنوز دانلود نشده — خطای شفاف برمی‌گردد
+        return target
 
     # ---------------- نصب هسته ----------------
 
@@ -91,7 +121,8 @@ class XrayManager:
                      + (f"({pin})" if pin else "(latest)"))
         tmp = os.path.join(cfg.XRAY_DIR, "core.zip")
         try:
-            with requests.get(url, stream=True, timeout=cfg.XRAY_DL_TIMEOUT) as r:
+            with requests.get(url, stream=True,
+                              timeout=cfg.XRAY_DL_TIMEOUT) as r:
                 r.raise_for_status()
                 with open(tmp, "wb") as f:
                     for chunk in r.iter_content(1 << 16):
@@ -134,8 +165,9 @@ class XrayManager:
 
     def read_version(self):
         try:
-            out = subprocess.run([cfg.XRAY_BIN, "version"], capture_output=True,
-                                 text=True, timeout=25, **self._pflags()).stdout
+            out = subprocess.run([self.exec_bin(), "version"],
+                                 capture_output=True, text=True,
+                                 timeout=25, **self._pflags()).stdout
             self.version = out.splitlines()[0].strip() if out else ""
         except Exception:
             self.version = ""
@@ -146,15 +178,17 @@ class XrayManager:
         return ibld.build_full_config(cfg.PAAS)
 
     def _spawn(self) -> bool:
+        binp = cfg.XRAY_BIN
         try:
+            binp = self.exec_bin()
             self._logf = open(cfg.XRAY_LOG, "ab")
             self.proc = subprocess.Popen(
-                [cfg.XRAY_BIN, "run", "-c", cfg.XRAY_CFG],
+                [binp, "run", "-c", cfg.XRAY_CFG],
                 stdout=self._logf, stderr=subprocess.STDOUT,
                 cwd=cfg.XRAY_DIR, **self._pflags())
             return True
         except Exception as e:
-            self.last_error = f"اجرای xray ناموفق: {e}"
+            self.last_error = f"اجرای xray ناموفق ({binp}): {e}"
             return False
 
     def stop(self):
@@ -195,6 +229,7 @@ class XrayManager:
             with open(cfg.XRAY_CFG, "w", encoding="utf-8") as f:
                 f.write(text)
             if not self._spawn():
+                db.log_event(f"اجرای هسته ناموفق: {self.last_error}", "err")
                 return False, self.last_error
 
             deadline = time.time() + cfg.XRAY_START_TIMEOUT
@@ -236,7 +271,8 @@ class XrayManager:
                 return False, self.last_error
             ok, err = self.apply(self.build_config())
             if ok:
-                db.log_event("هسته Xray اجرا شد ✅", "ok")
+                db.log_event(f"هسته Xray اجرا شد ✅ ({self.exec_bin()})",
+                             "ok")
             else:
                 db.log_event(f"اجرای Xray ناموفق: {err}", "err")
             return ok, err
@@ -274,8 +310,9 @@ class XrayManager:
             return ""
 
     def x25519(self) -> dict:
-        out = subprocess.run([cfg.XRAY_BIN, "x25519"], capture_output=True,
-                             text=True, timeout=25, **self._pflags()).stdout
+        out = subprocess.run([self.exec_bin(), "x25519"],
+                             capture_output=True, text=True,
+                             timeout=25, **self._pflags()).stdout
         priv = re.search(r"Private key:\s*(\S+)", out)
         pub = re.search(r"Public key:\s*(\S+)", out)
         if priv and pub:
@@ -283,7 +320,6 @@ class XrayManager:
         raise RuntimeError("خواندن خروجی x25519 ناموفق بود")
 
     def gen_selfsigned_cert(self, domain: str) -> dict:
-        """گواهی خودامضای ۱۰ ساله با openssl → مسیر فایل‌ها."""
         if not re.match(r"^[A-Za-z0-9.\-]+$", domain or ""):
             raise ValueError("دامنه نامعتبر است")
         key = os.path.join(cfg.CERT_DIR, domain + ".key")
@@ -291,9 +327,9 @@ class XrayManager:
         base_cmd = ["openssl", "req", "-x509", "-newkey", "rsa:2048",
                     "-sha256", "-days", "3650", "-nodes",
                     "-subj", f"/CN={domain}", "-keyout", key, "-out", crt]
-        r = subprocess.run(base_cmd + ["-addext", f"subjectAltName=DNS:{domain}"],
-                           capture_output=True, text=True, timeout=60,
-                           **self._pflags())
+        r = subprocess.run(
+            base_cmd + ["-addext", f"subjectAltName=DNS:{domain}"],
+            capture_output=True, text=True, timeout=60, **self._pflags())
         if r.returncode != 0:
             r = subprocess.run(base_cmd, capture_output=True, text=True,
                                timeout=60, **self._pflags())
@@ -315,8 +351,9 @@ def watchdog_loop(mgr: "XrayManager" = None):
             if not mgr.should_run or mgr.alive():
                 continue
             if time.time() - mgr._last_attempt < 30:
-                continue  # تازه تلاش شده؛ صبر کن
-            db.log_event("واچ‌داگ: هسته Xray پایین است؛ راه‌اندازی مجدد", "warn")
+                continue
+            db.log_event("واچ‌داگ: هسته Xray پایین است؛ راه‌اندازی مجدد",
+                         "warn")
             mgr.start()
         except Exception as e:
             db.log_event(f"واچ‌داگ: {e}", "err")
