@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """مدیریت هسته Xray — دانلود، اجرا، rollback خودکار، واچ‌داگ، ابزارها.
 
-⚠️ نکته PaaS (Railway/Render): volume ممکن است noexec مانت شود —
-نوشتن/خواندن مجاز است اما «اجرا»ی باینری از volume نه.
-راه‌حل: در حالت ابری هسته از /tmp اجرا می‌شود؛ کپی مبنا روی volume
-فقط کش است تا با ری‌استارت دوباره دانلود نشود.
+PaaS (Railway/Render): volume ممکن است noexec مانت شود؛ باینری برای
+اجرا به /tmp/sf-xray-run کپی می‌شود. فایل‌های geo (geoip.dat /
+geosite.dat) هم همراهش کپی می‌شوند و XRAY_LOCATION_ASSET هم ست
+می‌شود — دو لایه اطمینان برای پیدا شدن فایل‌های geo توسط Xray.
 """
 
 import os
@@ -24,9 +24,6 @@ from . import database as db
 from . import inbound_builder as ibld
 from .grpc_stats import XrayStatsClient
 
-# مسیر «اجرا»ی هسته:
-#   PaaS → /tmp/sf-xray-run/xray   (volume ممکن است noexec باشد)
-#   VPS  → همان cfg.XRAY_BIN
 EXEC_DIR = (os.path.join(tempfile.gettempdir(), "sf-xray-run")
             if cfg.PAAS else None)
 
@@ -65,9 +62,9 @@ class XrayManager:
     def _pflags():
         return {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
 
-    # ---------------- مسیر اجرا (رفع noexec روی PaaS) ----------------
+    # ---------------- مسیر اجرا (رفع noexec + geo روی PaaS) ----------------
 
-        def exec_bin(self) -> str:
+    def exec_bin(self) -> str:
         """باینری قابل اجرا — در PaaS کپی تازه در /tmp (رفع noexec).
         فایل‌های geo هم کنار باینری کپی می‌شوند (Xray همان‌جا می‌گردد)."""
         if EXEC_DIR is None:
@@ -76,7 +73,8 @@ class XrayManager:
         try:
             os.makedirs(EXEC_DIR, exist_ok=True)
             if (not os.path.isfile(target)
-                    or os.path.getmtime(target) < os.path.getmtime(cfg.XRAY_BIN)):
+                    or os.path.getmtime(target)
+                    < os.path.getmtime(cfg.XRAY_BIN)):
                 shutil.copy2(cfg.XRAY_BIN, target)
                 os.chmod(target, 0o755)
             for dat in ("geoip.dat", "geosite.dat"):
@@ -186,7 +184,7 @@ class XrayManager:
     def build_config(self) -> str:
         return ibld.build_full_config(cfg.PAAS)
 
-        def _spawn(self) -> bool:
+    def _spawn(self) -> bool:
         binp = cfg.XRAY_BIN
         try:
             binp = self.exec_bin()
@@ -284,8 +282,7 @@ class XrayManager:
                 return False, self.last_error
             ok, err = self.apply(self.build_config())
             if ok:
-                db.log_event(f"هسته Xray اجرا شد ✅ ({self.exec_bin()})",
-                             "ok")
+                db.log_event(f"هسته Xray اجرا شد ✅ ({self.exec_bin()})", "ok")
             else:
                 db.log_event(f"اجرای Xray ناموفق: {err}", "err")
             return ok, err
