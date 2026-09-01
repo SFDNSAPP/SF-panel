@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """روتر Layer-4 تک‌پورت (حالت ابری):
-درخواست‌های HTTP عادی → پنل (aiohttp داخلی)
-درخواست‌های WebSocket/httpupgrade با Path → اینباند متناظر Xray
-همه‌چیز روی همان یک PORT عمومی که پلتفرم (Railway/Render) می‌دهد.
+HTTP عادی → پنل | WebSocket/httpupgrade با Path → اینباند Xray
 """
 
 import asyncio
@@ -19,15 +17,12 @@ _HEAD_LIMIT = 16384
 class Router:
     def __init__(self, panel_port: int):
         self.panel_port = panel_port
-        self._routes = {}          # path → internal_port
+        self._routes = {}
         self._server = None
         self.active = 0
         self.total_relayed = 0
 
-    # ---------------- مسیرها ----------------
-
     def refresh(self):
-        """بازخوانی مسیرهای اینباند‌ها از دیتابیس (بعد از هر تغییر)."""
         routes = {}
         if cfg.PAAS:
             for ib in db.q("SELECT internal_port, config, enable FROM inbounds"):
@@ -47,8 +42,6 @@ class Router:
         return [{"path": p, "internal_port": port}
                 for p, port in sorted(self._routes.items())]
 
-    # ---------------- سرویس ----------------
-
     async def serve(self, host="0.0.0.0", port=None):
         port = cfg.PUBLIC_PORT if port is None else port
         self.refresh()
@@ -58,8 +51,6 @@ class Router:
                      f"({len(self._routes)} مسیر پروکسی)", "ok")
         async with self._server:
             await self._server.serve_forever()
-
-    # ---------------- هندلر ----------------
 
     async def _handle(self, reader, writer):
         self.active += 1
@@ -71,17 +62,16 @@ class Router:
                 return
             parsed = self._parse(head)
             if parsed is None:
-                await self._respond(writer, 400, b"Bad Request")
+                await self._respond(writer, 400, b"SF-Router: Bad Request")
                 return
             _method, path, upgrade = parsed
-            if upgrade and upgrade in _PROXY_UPGRADES:
+            if upgrade in _PROXY_UPGRADES:
                 port = self.route_for(path)
                 if port is None:
-                    await self._respond(writer, 404, b"Not Found")
+                    await self._respond(writer, 404, b"SF-Router: Not Found")
                     return
                 await self._relay(reader, writer, port, head)
             else:
-                # ترافیک پنل — IP واقعی کلاینت را تزریق می‌کنیم
                 await self._relay(reader, writer, self.panel_port,
                                   self._inject_xff(head, peer_ip))
         except (ConnectionError, asyncio.TimeoutError,
@@ -96,10 +86,7 @@ class Router:
             except Exception:
                 pass
 
-    # ---------------- اجزا ----------------
-
     async def _read_head(self, reader):
-        """خواندن هدرهای HTTP تا \r\n\r\n (با مهلت ۱۲ ثانیه)."""
         buf = b""
         deadline = time.monotonic() + 12
         while b"\r\n\r\n" not in buf and len(buf) < _HEAD_LIMIT:
@@ -118,7 +105,6 @@ class Router:
 
     @staticmethod
     def _parse(head: bytes):
-        """→ (METHOD, path, upgrade_header) یا None اگر HTTP نباشد."""
         try:
             text = head.split(b"\r\n\r\n", 1)[0].decode("latin-1", "replace")
         except Exception:
@@ -149,13 +135,13 @@ class Router:
             sreader, swriter = await asyncio.wait_for(
                 asyncio.open_connection("127.0.0.1", port), timeout=8)
         except Exception:
-            await self._respond(cwriter, 502, b"Bad Gateway")
+            await self._respond(cwriter, 502, b"SF-Router: Bad Gateway")
             return
         try:
             swriter.write(prefix)
             await swriter.drain()
-            t1 = asyncio.create_task(self._pump(creader, swriter))
-            t2 = asyncio.create_task(self._pump(sreader, cwriter))
+            t1 = asyncio.ensure_future(self._pump(creader, swriter))
+            t2 = asyncio.ensure_future(self._pump(sreader, cwriter))
             _done, pending = await asyncio.wait(
                 {t1, t2}, return_when=asyncio.FIRST_COMPLETED)
             for t in pending:
