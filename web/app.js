@@ -1,6 +1,23 @@
 'use strict';
-/* SF-Panel — app.js FINAL (i18n · neon · chart-fix · links-warning)
+/* SF-Panel — app.js v2.2
+   NEW: XHTTP · Sniffing · ProxyProtocol · Extra JSON · hasInbound fix
    Requires: i18n.js */
+
+/* ---------- کلیدهای i18n جدید (به دیکشنری موجود اضافه می‌شوند) ---------- */
+Object.assign(I18N, {
+  'ib.tr.xhttp':     { en: 'XHTTP (censorship-resistant)', fa: 'XHTTP (مقاوم در فیلترینگ)' },
+  'ib.xhttpMode':    { en: 'XHTTP mode', fa: 'حالت XHTTP' },
+  'ib.xhttpHint':    { en: 'XHTTP works best with TLS on a real domain. Reality is not supported.', fa: 'XHTTP با TLS روی دامنه واقعی بهترین عملکرد را دارد. Reality پشتیبانی نمی‌شود.' },
+  'ib.advanced':     { en: '⚙️ Advanced', fa: '⚙️ تنظیمات پیشرفته' },
+  'ib.sniff':        { en: 'Sniffing (protocol detection)', fa: 'Sniffing (تشخیص پروتکل)' },
+  'ib.sniffOn':      { en: 'Enable sniffing', fa: 'فعال‌بودن sniffing' },
+  'ib.sniffDest':    { en: 'Destinations (comma: http,tls,quic)', fa: 'مقاصد (با کاما: http,tls,quic)' },
+  'ib.sniffRoute':   { en: 'routeOnly (sniff only for routing)', fa: 'routeOnly (فقط برای مسیریابی)' },
+  'ib.proxyProt':    { en: 'Accept Proxy Protocol (behind HAProxy/CDN)', fa: 'پذیرش Proxy Protocol (پشت HAProxy/CDN)' },
+  'ib.extra':        { en: 'Extra JSON (merged into inbound — advanced)', fa: 'Extra JSON (ادغام در اینباند — حرفه‌ای)' },
+  'ib.extraPh':      { en: 'e.g. {"allocate": {"strategy": "random"}}', fa: 'مثلاً {"allocate": {"strategy": "random"}}' },
+  'fm.generate':     { en: 'Generate', fa: 'تولید' },
+});
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;')
@@ -11,6 +28,11 @@ let USER  = localStorage.getItem('sf_user') || '';
 let PAAS = false, VIEW = 'dashboard', POLL = null, POLL_MS = 6000;
 let inboundsCache = [], clientsCache = [], chartSeries = [];
 let currentModal = null;
+
+/* FIX: مقایسه امن اینباند (string vs number) */
+function hasInbound(c, ibId) {
+    return (c && (c.inbounds || [])).some(x => Number(x) === Number(ibId));
+}
 
 (function () {
     const c = document.createElement('style');
@@ -25,6 +47,8 @@ let currentModal = null;
         '.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}',
         '.tag-list{display:flex;flex-wrap:wrap;gap:5px}',
         '.modal-err{color:var(--bad);font-size:.8rem;min-height:18px;margin-top:8px}',
+        '.adv-box{margin-top:14px;padding:14px;border:1px dashed var(--bd2);border-radius:12px;background:rgba(0,255,157,.03)}',
+        '.adv-box .lbl2{margin-top:12px}',
     ].join('\n');
     document.head.appendChild(c);
 })();
@@ -334,7 +358,6 @@ function renderDashboard(d) {
     chartSeries = d.series || [];
     drawChart();
 }
-/* FIX: اندازه فقط از CSS؛ JS فقط رزولوشن — دیگر رشد نمی‌کند */
 function drawChart() {
     const cv = $('chart');
     if (!cv) return;
@@ -413,6 +436,9 @@ function renderInbounds() {
             detail = `<span class="mono">${esc(g.transport || 'ws')}</span> → <span class="mono">${esc(g.path || '')}</span>`;
         } else {
             detail = `Port <b>${esc(g.port)}</b> · <span class="mono">${esc(g.transport || 'tcp')}/${esc(g.security || 'none')}</span>`;
+            if (g.transport === 'xhttp' && g.xhttpMode) {
+                detail += `<div class="cell-sub mono">mode: ${esc(g.xhttpMode)}</div>`;
+            }
             if (g.path) detail += `<div class="cell-sub mono">${esc(g.path)}</div>`;
         }
         return `<tr>
@@ -461,11 +487,14 @@ function inboundForm(row) {
     const isNew = !row;
     const g = row ? (row.config || {}) : {};
     const proto = g.protocol || 'vless';
+    const sniff = g.sniff || {};
+    const sniffDest = (sniff.destOverride || ['http', 'tls']).join(',');
 
     const protoOpts = ['vless', 'vmess', 'trojan', 'shadowsocks']
         .map(p => `<option value="${p}" ${proto === p ? 'selected' : ''}
             ${PAAS && p === 'shadowsocks' ? 'disabled' : ''}>${p.toUpperCase()}</option>`).join('');
-    const trKeys = PAAS ? ['ws', 'httpupgrade'] : ['tcp', 'ws', 'grpc', 'httpupgrade'];
+    const trKeys = PAAS ? ['ws', 'httpupgrade']
+                         : ['tcp', 'ws', 'grpc', 'httpupgrade', 'xhttp'];
     const trSel = g.transport || (PAAS ? 'ws' : 'tcp');
     const trOpts = trKeys.map(v =>
         `<option value="${v}" ${trSel === v ? 'selected' : ''}>${esc(I('ib.tr.' + v, v))}</option>`).join('');
@@ -475,6 +504,8 @@ function inboundForm(row) {
         .map(([v, t]) => `<option value="${v}" ${secSel === v ? 'selected' : ''}>${esc(t)}</option>`).join('');
     const methodOpts = SS_METHODS.map(m =>
         `<option ${g.method === m ? 'selected' : ''}>${m}</option>`).join('');
+    const xhModes = ['auto', 'packet-up', 'stream-up', 'stream-one']
+        .map(m => `<option value="${m}" ${(g.xhttpMode || 'auto') === m ? 'selected' : ''}>${m}</option>`).join('');
     const r = g.reality || {};
 
     const paasFields = `
@@ -498,6 +529,11 @@ function inboundForm(row) {
                 <input id="ibPath" class="ltr" value="${esc(g.path || '')}" placeholder="/mypath"></div>
             <div class="f" id="ibHostRow"><label>${esc(I('ib.host'))}</label>
                 <input id="ibHost" class="ltr" value="${esc(g.host || '')}"></div>
+        </div>
+        <div class="f" id="ibXhttpRow" class="hidden">
+            <label>${esc(I('ib.xhttpMode'))}</label>
+            <select id="ibXhttpMode">${xhModes}</select>
+            <div class="hint">${esc(I('ib.xhttpHint'))}</div>
         </div>
         <div class="f"><label>${esc(I('ib.security'))}</label>
             <select id="ibSecurity">${secOpts}</select></div>
@@ -549,6 +585,32 @@ function inboundForm(row) {
             </div>
         </div>`;
 
+    /* ---- جعبه تنظیمات پیشرفته (Sniffing / ProxyProtocol / Extra) ---- */
+    const advBox = `
+        <div class="adv-box">
+            <div class="lbl2">${esc(I('ib.advanced'))}</div>
+            <div class="f sw-row">
+                <span class="sw"><input type="checkbox" id="ibSniffOn" ${sniff.enabled !== false ? 'checked' : ''}><span></span></span>
+                <span>${esc(I('ib.sniffOn'))}</span>
+            </div>
+            <div class="f">
+                <label>${esc(I('ib.sniffDest'))}</label>
+                <input id="ibSniffDest" class="ltr" value="${esc(sniffDest)}" placeholder="http,tls">
+            </div>
+            <div class="f sw-row">
+                <span class="sw"><input type="checkbox" id="ibRouteOnly" ${sniff.routeOnly ? 'checked' : ''}><span></span></span>
+                <span>${esc(I('ib.sniffRoute'))}</span>
+            </div>
+            <div class="f sw-row">
+                <span class="sw"><input type="checkbox" id="ibProxyProt" ${g.proxyProtocol ? 'checked' : ''}><span></span></span>
+                <span>${esc(I('ib.proxyProt'))}</span>
+            </div>
+            <div class="f">
+                <label>${esc(I('ib.extra'))}</label>
+                <textarea id="ibExtra" rows="3" class="ltr" placeholder="${esc(I('ib.extraPh'))}">${esc(typeof g.extra === 'object' ? JSON.stringify(g.extra, null, 2) : (g.extra || ''))}</textarea>
+            </div>
+        </div>`;
+
     openModal(isNew ? I('ib.new') : I('ib.editTitle'), `
         <div class="form-grid">
             <div class="f"><label>${esc(I('ib.remark'))}</label>
@@ -558,6 +620,7 @@ function inboundForm(row) {
         </div>
         ${PAAS ? paasFields : vpsFields}
         ${ssBox}
+        ${advBox}
         <div class="modal-err" id="ibErr"></div>
     `, `
         <button class="btn btn-pri" id="ibSave">${esc(I('common.save'))}</button>
@@ -571,11 +634,17 @@ function inboundForm(row) {
         const sec = PAAS ? 'none' : ($ib('ibSecurity') || {}).value;
         $ib('ibSsBox').classList.toggle('hidden', p !== 'shadowsocks');
         if (!PAAS) {
+            const pathIsService = tr === 'grpc';
+            const hasPath = ['ws', 'httpupgrade', 'xhttp'].includes(tr);
             $ib('ibPathLbl').textContent =
-                tr === 'grpc' ? I('ib.grpcService') : I('ib.path');
-            $ib('ibPath').placeholder = tr === 'grpc' ? 'myservice' : '/mypath';
+                pathIsService ? I('ib.grpcService') : I('ib.path');
+            $ib('ibPath').placeholder =
+                pathIsService ? 'myservice' : '/mypath';
+            $ib('ibPath').parentElement.style.display =
+                (pathIsService || hasPath) ? '' : 'none';
             $ib('ibHostRow').style.display =
-                ['ws', 'httpupgrade'].includes(tr) ? '' : 'none';
+                ['ws', 'httpupgrade', 'xhttp'].includes(tr) ? '' : 'none';
+            $ib('ibXhttpRow').style.display = tr === 'xhttp' ? '' : 'none';
             $ib('ibTlsBox').classList.toggle('hidden', sec !== 'tls');
             $ib('ibRealityBox').classList.toggle('hidden', sec !== 'reality');
         }
@@ -602,7 +671,7 @@ function inboundForm(row) {
             btnLoad(cb, true);
             try {
                 const domain = $ib('ibSni').value.trim() ||
-                               ($('setDomain') || {}).value?.trim() || '';
+                               (($('setDomain') || {}).value || '').trim() || '';
                 const c = await api('/api/xray/cert',
                                     { method: 'POST', body: { domain } });
                 $ib('ibCert').value = c.certFile;
@@ -618,6 +687,14 @@ function inboundForm(row) {
     $('ibCancel').onclick = closeModal;
     $('ibSave').onclick = async () => {
         const err = $ib('ibErr'); err.textContent = '';
+
+        /* اعتبارسنجی Extra JSON */
+        let extraRaw = $ib('ibExtra').value.trim();
+        if (extraRaw) {
+            try { JSON.parse(extraRaw); }
+            catch (e) { err.textContent = 'Extra JSON: ' + e.message; return; }
+        }
+
         const cfg = { protocol: $ib('ibProto').value };
         if (PAAS) {
             cfg.transport = $ib('ibTransport').value;
@@ -628,6 +705,8 @@ function inboundForm(row) {
             cfg.path = $ib('ibPath').value.trim();
             cfg.host = $ib('ibHost').value.trim();
             cfg.security = $ib('ibSecurity').value;
+            if (cfg.transport === 'xhttp')
+                cfg.xhttpMode = $ib('ibXhttpMode').value;
             if (cfg.security === 'tls') {
                 cfg.sni = $ib('ibSni').value.trim();
                 cfg.alpn = $ib('ibAlpn').value.trim();
@@ -644,11 +723,19 @@ function inboundForm(row) {
                     shortIds: $ib('ibRSids').value,
                 };
             }
+            cfg.proxyProtocol = $ib('ibProxyProt').checked;
         }
         if (cfg.protocol === 'shadowsocks') {
             cfg.method = $ib('ibMethod').value;
             cfg.password = $ib('ibPass').value.trim();
         }
+        cfg.sniff = {
+            enabled: $ib('ibSniffOn').checked,
+            destOverride: $ib('ibSniffDest').value.trim(),
+            routeOnly: $ib('ibRouteOnly').checked,
+        };
+        if (extraRaw) cfg.extra = extraRaw;
+
         const payload = { remark: $ib('ibRemark').value.trim(), config: cfg };
         btnLoad($('ibSave'), true);
         try {
@@ -763,7 +850,7 @@ function clientForm(c) {
             <div class="chk-list">${inbs.map(ib => `
                 <label class="chk-item ${ib.enable ? '' : 'dis'}">
                     <input type="checkbox" class="cl-inb" value="${ib.id}"
-                        ${c && (c.inbounds || []).includes(ib.id) ? 'checked' : ''}
+                        ${hasInbound(c, ib.id) ? 'checked' : ''}
                         ${ib.enable ? '' : 'disabled'}>
                     <span>${esc(ib.remark)}</span>
                     <span class="badge b-${ib.protocol}">${ib.protocol.toUpperCase()}</span>
@@ -824,7 +911,7 @@ function clientForm(c) {
 
     const updateFlowVis = () => {
         const sel = [...$('modalBody').querySelectorAll('.cl-inb:checked')]
-            .map(el => inboundsCache.find(x => x.id == el.value));
+            .map(el => inboundsCache.find(x => Number(x.id) === Number(el.value)));
         $cl('clFlowRow').classList.toggle('hidden',
             PAAS || !sel.some(x => x && x.protocol === 'vless'));
     };
@@ -891,7 +978,7 @@ function clientForm(c) {
     };
 }
 
-/* FIX: اگر لینکی نبود، علت فارسی/انگلیسی نوشته می‌شود */
+/* ---------- لینک‌ها با هشدار ---------- */
 async function showLinks(id) {
     openModal(I('ln.title'), `<div class="muted">${esc(I('common.loading'))}</div>`, '', true);
     try {
