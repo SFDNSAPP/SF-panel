@@ -28,6 +28,65 @@ def _fmt_toman(n) -> str:
     return f"{int(n or 0):,} تومان"
 
 
+def _send_account_details(tg: int, acc: dict, days, gb):
+    """ارسال کامل اطلاعات اکانت: ساب + کانفیگ‌ها + QR"""
+    base = base_url()
+    sub_url = f"{base}/sub/{acc['sub_id']}"
+
+    # پیام اصلی موفقیت
+    send_message(
+        tg,
+        texts.T["buy_success"].format(
+            email=acc["email"],
+            days=days or "∞",
+            gb=gb or "∞",
+            sub=sub_url,
+        ),
+        reply_markup=main_kb(),
+    )
+
+    # ارسال لینک‌های کانفیگ (vless / vmess / ...)
+    links = acc.get("links") or []
+    if links:
+        configs_txt = "📡 <b>کانفیگ‌های مستقیم:</b>\n\n"
+        for i, lk in enumerate(links[:6], 1):  # حداکثر ۶ تا
+            name = texts.esc(lk.get("remark") or lk.get("name") or f"#{i}")
+            link = lk.get("link") or ""
+            configs_txt += f"<b>{i}. {name}</b>\n<code>{link}</code>\n\n"
+        send_message(tg, configs_txt)
+
+    # ارسال QR کد (اولین لینک یا ساب)
+    try:
+        import io
+        import qrcode
+        import requests
+        from core import database as panel_db
+
+        qr_data = links[0]["link"] if links else sub_url
+        qr = qrcode.QRCode(version=1, box_size=8, border=2)
+        qr.add_data(qr_data)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+
+        token = panel_db.get_setting("tg_token")
+        if token:
+            requests.post(
+                f"https://api.telegram.org/bot{token}/sendPhoto",
+                data={
+                    "chat_id": tg,
+                    "caption": "📱 QR Code — اسکن کن یا لینک ساب رو کپی کن",
+                },
+                files={"photo": ("qr.png", buf, "image/png")},
+                timeout=20,
+            )
+    except Exception:
+        # اگر qrcode نصب نبود یا خطا خورد، فقط لینک ساب کافیست
+        pass
+
+
 def route_callback(data: str, chat, cbq):
     tg = int(chat)
     sdb.ensure_user(tg)
@@ -307,17 +366,7 @@ def cb_pay(tg: int, pid: str):
     with _states_lock:
         _states.pop(tg, None)
 
-    base = base_url()
-    send_message(
-        tg,
-        texts.T["buy_success"].format(
-            email=acc["email"],
-            days=p["days"] or "∞",
-            gb=p["limit_gb"] or "∞",
-            sub=f"{base}/sub/{acc['sub_id']}",
-        ),
-        reply_markup=main_kb(),
-    )
+    _send_account_details(tg, acc, p["days"], p["limit_gb"])
 
 
 # ---------------- اکانت تست ----------------
@@ -386,17 +435,7 @@ def cb_trial_go(tg: int):
         ),
     )
 
-    base = base_url()
-    send_message(
-        tg,
-        texts.T["trial_ok"].format(
-            email=acc["email"],
-            gb=gb,
-            days=days,
-            sub=f"{base}/sub/{acc['sub_id']}",
-        ),
-        reply_markup=main_kb(),
-    )
+    _send_account_details(tg, acc, days, gb)
 
 
 # ---------------- ریفرال ----------------

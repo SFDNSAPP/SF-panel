@@ -36,10 +36,20 @@ def _ok_role(chat, roles=("owner", "admin")):
 # ================================================== ورود / داشبورد
 
 def cmd_panel(chat):
-    if not _ok_role(chat):
-        send_message(chat, "⛔ این بخش فقط برای مدیران است.")
-        return
     tg = int(chat)
+    if not _ok_role(chat):
+        from core import database as panel_db
+        admins_raw = (panel_db.get_setting("tg_admins") or "").strip()
+        send_message(
+            chat,
+            "⛔ این بخش فقط برای مدیران است.\n\n"
+            f"آیدی عددی شما: <code>{tg}</code>\n\n"
+            "اگر مدیر هستید، این آیدی را در تنظیمات پنل وب "
+            "داخل فیلد <b>tg_admins</b> بگذارید "
+            "(چند آیدی را با کاما جدا کنید).\n\n"
+            f"مقدار فعلی tg_admins:\n<code>{texts.esc(admins_raw) or 'خالی'}</code>"
+        )
+        return
     with _states_lock:
         _states.pop(tg, None)
 

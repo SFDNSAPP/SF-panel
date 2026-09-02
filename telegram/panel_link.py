@@ -71,12 +71,19 @@ def create_account(tg_id: int, days: int, limit_gb: int):
         return None, "خطای سرور در فعال‌سازی هسته. چند لحظه بعد دوباره امتحان کن."
 
     c = pdb.q("SELECT * FROM clients WHERE id=?", (cid,), one=True)
+    links = []
+    try:
+        if c:
+            links = client_links(c)
+    except Exception:
+        links = []
     return {
         "email": email,
         "sub_id": sub_id,
         "client": c,
         "expires_at": expiry,
         "limit_bytes": limit,
+        "links": links,
     }, None
 
 
