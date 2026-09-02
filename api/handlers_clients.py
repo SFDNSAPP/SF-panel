@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""CRUD کاربران — اعتبارسنجی، لینک‌ها، آمار روزانه."""
+"""CRUD کاربران — v2.2 با خودترمیمی اتصال اینباند."""
 
 import re
 import uuid as uuidlib
 
 from core import config as cfg
 from core import database as db
-from core.security import random_password
-from core.utils import load_json, dump_json, now_ms
+from core.security import random_password, random_token
+from core.utils import load_json, dump_json, now_ms, to_int
 from core.link_builder import client_links, resolve_public_host
 
 from .common import (json_ok, json_err, body_json, auth_required,
@@ -15,6 +15,22 @@ from .common import (json_ok, json_err, body_json, auth_required,
 
 _EMAIL_RE = re.compile(r"^[\w.\-@ ]{1,64}$", re.UNICODE)
 _FLOWS = ("", "xtls-rprx-vision")
+
+
+def _heal_inbounds(c: dict) -> dict:
+    """خودترمیمی: اتصال کاربر به اینباند‌های فعال معتبر می‌شود.
+    اگر لیست کهنه/خالی بود و اینباند فعال وجود داشت، خودکار وصل می‌شود."""
+    own = [to_int(x) for x in load_json(c["inbounds"], [])]
+    enabled = [r["id"] for r in db.q("SELECT id FROM inbounds WHERE enable=1")]
+    valid = [x for x in own if x in enabled]
+    if c["enable"] and not valid and enabled:
+        valid = enabled          # اتصال خراب بود → وصل به همه‌ی فعال‌ها
+    if valid != own:
+        db.ex("UPDATE clients SET inbounds=? WHERE id=?",
+              (dump_json(valid), c["id"]))
+        c = dict(c)
+        c["inbounds"] = dump_json(valid)
+    return c
 
 
 def _parse_client(d: dict):
@@ -34,10 +50,9 @@ def _parse_client(d: dict):
 
     inb = []
     for x in (d.get("inbounds") or []):
-        try:
-            inb.append(int(x))
-        except (TypeError, ValueError):
-            pass
+        x = to_int(x, None)
+        if x is not None:
+            inb.append(x)
     valid_ids = {r["id"] for r in db.q("SELECT id FROM inbounds")}
     inb = [x for x in dict.fromkeys(inb) if x in valid_ids]
     if not inb:
@@ -87,7 +102,8 @@ async def api_list(request):
     names = {i["id"]: i["remark"] for i in
              db.q("SELECT id, remark FROM inbounds")}
     out = []
-    for c in db.q("SELECT * FROM clients ORDER BY id DESC"):
+    for row in db.q("SELECT * FROM clients ORDER BY id DESC"):
+        c = _heal_inbounds(row)          # ← خودترمیمی قبل از نمایش
         arr = load_json(c["inbounds"], [])
         out.append({
             "id": c["id"], "email": c["email"], "uuid": c["uuid"],
@@ -117,7 +133,6 @@ async def api_create(request):
     if serr:
         return json_err(serr)
 
-    from core.security import random_token
     sub_id = random_token(9)
     while db.q("SELECT id FROM clients WHERE sub_id=?", (sub_id,), one=True):
         sub_id = random_token(9)
@@ -239,6 +254,7 @@ async def api_links(request):
     if not c:
         return json_err("کاربر یافت نشد.", 404)
 
+    c = _heal_inbounds(c)                # ← خودترمیمی قبل از ساخت لینک
     host = resolve_public_host(request.host)
     links = client_links(c, host=host)
 
