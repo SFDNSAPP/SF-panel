@@ -1,11 +1,29 @@
 # -*- coding: utf-8 -*-
-"""ابزارهای کوچک مشترک."""
+"""ابزارهای مشترک — فقط stdlib؛ هیچ import از بقیه‌ی core (ضد circular import)."""
+
 import json
+import re
 import time
+
+ALLOWED_FLOWS = ("", "xtls-rprx-vision")
 
 
 def now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def effective_flow(client_flow, proto, transport, security):
+    """فلوِ منطقی VLESS — Vision فقط روی TCP با TLS/Reality.
+    اینجا زندگی می‌کند تا inbound_builder و link_builder بدون
+    import از یکدیگر از آن استفاده کنند (رفع circular import)."""
+    if proto != "vless" or transport != "tcp":
+        return ""
+    if security not in ("tls", "reality"):
+        return ""
+    f = (client_flow or "").strip()
+    if security == "reality" and not f:
+        return "xtls-rprx-vision"
+    return f if f in ALLOWED_FLOWS else ""
 
 
 def load_json(text, default):
@@ -36,7 +54,8 @@ def fmt_bytes(n) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB", "PB"):
         if n < 1024 or unit == "PB":
             s = f"{n:.2f}".rstrip("0").rstrip(".")
-            return ("-" if neg else "") + (f"{s} {unit}" if unit != "B" else f"{int(n)} B")
+            return ("-" if neg else "") + (
+                f"{s} {unit}" if unit != "B" else f"{int(n)} B")
         n /= 1024
     return "0 B"
 
@@ -49,15 +68,18 @@ def fmt_duration(seconds) -> str:
     h, r = divmod(r, 3600)
     m, s = divmod(r, 60)
     parts = []
-    if d: parts.append(f"{d}d")
-    if h: parts.append(f"{h}h")
-    if m: parts.append(f"{m}m")
-    if s and not d: parts.append(f"{s}s")
+    if d:
+        parts.append(f"{d}d")
+    if h:
+        parts.append(f"{h}h")
+    if m:
+        parts.append(f"{m}m")
+    if s and not d:
+        parts.append(f"{s}s")
     return " ".join(parts) or "0s"
 
 
 def deep_merge(base: dict, patch: dict) -> dict:
-    """ادغام عمیق؛ patch روی base برنده است."""
     for k, v in patch.items():
         if isinstance(v, dict) and isinstance(base.get(k), dict):
             deep_merge(base[k], v)
@@ -67,7 +89,5 @@ def deep_merge(base: dict, patch: dict) -> dict:
 
 
 def is_safe_path(path: str) -> bool:
-    """مسیر WS/گرپ‌سی امن برای اینباند."""
-    import re
     return bool(re.match(r"^/[A-Za-z0-9_\-./]{1,120}$", path or "")) \
         and ".." not in path and not path.endswith("/")
