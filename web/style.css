@@ -475,3 +475,16 @@ td .tag-list { display: flex; flex-wrap: wrap; gap: 5px; max-width: 220px; }
     transition-duration: .01ms !important;
   }
        }
+
+/* ═══ FIX v2.2: سوییچ جهت-آگاه — دستگیره دیگر بیرون نمی‌زند ═══ */
+.sw span::after {
+  inset-inline-start: 3px;
+  transform: none;
+  transition: inset-inline-start .25s ease, background .25s ease;
+}
+.sw input:checked + span::after {
+  inset-inline-start: 23px;
+  transform: none;
+  background: #04231a;
+}
+td .sw { flex: 0 0 auto; }
