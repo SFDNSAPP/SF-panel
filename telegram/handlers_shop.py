@@ -217,8 +217,8 @@ def cb_trial_go(tg: int):
         return
     sdb.ex("UPDATE users SET trial_last=? WHERE tg_id=?", (now_ms(), tg))
     sdb.ex("INSERT INTO bot_accounts(user_id,plan_id,email,sub_id,"
-           "expires_at,limit_bytes,ts) VALUES(0,0,?,?,?,?,?)",
-           (acc["email"], acc["sub_id"], acc["expires_at"],
+           "expires_at,limit_bytes,ts) VALUES(?,0,?,?,?,?,?)",
+           (tg, acc["email"], acc["sub_id"], acc["expires_at"],
             acc["limit_bytes"], now_ms()))
     base = base_url()
     send_message(tg, texts.T["trial_ok"].format(
