@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-"""روتر Layer-4 تک‌پورت (حالت ابری) — ROUTER-V3-PASSTHROUGH
-HTTP عادی → پنل (بایت‌ها دست‌نخورده عبور می‌کنند)
-WebSocket/httpupgrade با Path → اینباند متناظر Xray
-IP واقعی از هدر X-Forwarded-For خود پلتفرم می‌آید (نیازی به تزریق نیست).
+"""روتر Layer-4 — v4 SELF-HEALING
+هر اتصال، مسیرها را با کش ۳ ثانیه از دیتابیس می‌خواند —
+هر تغییری (حتی از کنسول) بلافاصله روی روتر زنده اعمال می‌شود.
 """
 
 import asyncio
@@ -14,6 +13,7 @@ from .utils import load_json
 
 _PROXY_UPGRADES = {"websocket", "httpupgrade"}
 _HEAD_LIMIT = 16384
+_REFRESH_EVERY = 3.0
 
 
 class Router:
@@ -23,6 +23,7 @@ class Router:
         self._server = None
         self.active = 0
         self.total_relayed = 0
+        self._last_refresh = 0.0
 
     # ---------------- مسیرها ----------------
 
@@ -37,11 +38,21 @@ class Router:
                 if p:
                     routes[p] = ib["internal_port"]
         self._routes = routes
+        self._last_refresh = time.time()
+
+    def _maybe_refresh(self):
+        if time.time() - self._last_refresh > _REFRESH_EVERY:
+            try:
+                self.refresh()
+            except Exception:
+                pass
 
     def route_for(self, path: str):
+        self._maybe_refresh()
         return self._routes.get(path.split("?", 1)[0])
 
     def routes_info(self):
+        self._maybe_refresh()
         return [{"path": p, "internal_port": port}
                 for p, port in sorted(self._routes.items())]
 
@@ -67,7 +78,6 @@ class Router:
                 return
             parsed = self._parse(head)
             if parsed is None:
-                db.log_event("router: درخواست غیر-HTTP رد شد (400)", "warn")
                 await self._respond(writer, 400, b"SF-Router: Bad Request")
                 return
             _method, path, upgrade = parsed
@@ -78,7 +88,6 @@ class Router:
                     return
                 await self._relay(reader, writer, port, head)
             else:
-                # ترافیک پنل — شفاف، بدون هیچ تغییری
                 await self._relay(reader, writer, self.panel_port, head)
         except (ConnectionError, asyncio.TimeoutError,
                 asyncio.IncompleteReadError, asyncio.LimitOverrunError):
@@ -136,8 +145,6 @@ class Router:
             sreader, swriter = await asyncio.wait_for(
                 asyncio.open_connection("127.0.0.1", port), timeout=8)
         except Exception:
-            db.log_event(f"router: اتصال به پورت داخلی {port} ناموفق (502)",
-                         "err")
             await self._respond(cwriter, 502, b"SF-Router: Bad Gateway")
             return
         try:
