@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""CRUD اینباند‌ها — اعتبارسنجی کامل + اعمال روی هسته."""
+"""CRUD اینباند‌ها — v2.2.2
+FIX: ترتیب ستون‌ها در INSERT (قبلاً internal_port=1 می‌شد!)"""
 
 import re
 import uuid as uuidlib
@@ -25,7 +26,6 @@ def _taken_paths(exclude_id=None):
 
 
 def _port_conflict(port, exclude_id=None):
-    """فقط حالت VPS — پورت‌ها واقعی‌اند و نباید تکراری شوند."""
     if cfg.PAAS:
         return None
     for r in db.q("SELECT id, config FROM inbounds"):
@@ -38,7 +38,6 @@ def _port_conflict(port, exclude_id=None):
 
 
 def _create_ss_client(iid: int, remark: str, g: dict) -> None:
-    """Shadowsocks تک‌کاربره است؛ کاربر اختصاصی می‌سازیم."""
     base = re.sub(r"[^\w\-]", "-", remark).strip("-") or "ss"
     email = base
     while db.q("SELECT id FROM clients WHERE email=?", (email,), one=True):
@@ -63,6 +62,7 @@ async def api_list(request):
             "protocol": r["protocol"],
             "enable": bool(r["enable"]),
             "config": load_json(r["config"], {}),
+            "internal_port": r["internal_port"],
             "up": r["up_total"],
             "down": r["down_total"],
             "clients": sum(1 for c in clients
@@ -84,9 +84,10 @@ async def api_create(request):
     if perr:
         return json_err(perr)
 
+    # ✅ FIX: enable=1 (literal) · internal_port=next · created_at
     iid = db.ex(
         "INSERT INTO inbounds(remark,protocol,config,enable,internal_port,created_at) "
-        "VALUES(?,?,?,?,1,?)",
+        "VALUES(?,?,?,1,?,?)",
         (remark, g["protocol"], dump_json(g),
          db.next_internal_port(), now_ms()))
     if g["protocol"] == "shadowsocks":
@@ -123,6 +124,7 @@ async def api_update(request):
     if perr:
         return json_err(perr)
 
+    # internal_port دست‌نخورده می‌ماند
     db.ex("UPDATE inbounds SET remark=?, protocol=?, config=? WHERE id=?",
           (remark, g["protocol"], dump_json(g), iid))
     ok, xerr = await apply_config()
