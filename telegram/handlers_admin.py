@@ -44,7 +44,8 @@ def _ok_role(chat, roles=("owner", "admin")):
 
 # ================================================== ورود / داشبورد
 
-def cmd_panel(chat):
+def cmd_panel(chat, args=None):
+    """args برای سازگاری با route که (chat, args) می‌فرستد"""
     tg = int(chat)
     try:
         if not _ok_role(chat):
@@ -1021,3 +1022,4 @@ def fsm_input(tg: int, text: str, states: dict, st, data) -> bool:
         return True
 
     return False
+
