@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """Subscription endpoint — /sub/{token}
-اپ‌ها: لینک‌ها + هدر Subscription-Userinfo
-مرورگر: صفحه داشبورد (قالب از web/sub_page.html خوانده می‌شود)"""
+  • اپ‌های پروکسی (v2rayNG/Hiddify/v2raytun/...) → پیش‌فرض: لینک‌ها + Userinfo
+  • مرورگر واقعی → صفحه داشبورد HTML (قالب: web/sub_page.html)
+  • ?web=1 اجبار صفحه HTML · ?raw=1 متن خام
+"""
 
 import base64
 import json
@@ -18,12 +20,19 @@ from core.link_builder import client_links, resolve_public_host
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9_\-]{4,64}$")
 _PAGE_PATH = os.path.join(cfg.BASE_DIR, "web", "sub_page.html")
 
+# UAهای اپ‌های پروکسی / ابزارها → فرمت ساده
 _APP_UA = ("v2ray", "hiddify", "sing-box", "singbox", "clash",
            "shadowrocket", "streisand", "nekobox", "nekoray", "karing",
            "husi", "loon", "quantumult", "surge", "okhttp", "ktor",
            "dart", "curl", "wget", "python-requests",
            "python-urllib", "axios", "java/", "go-http-client",
-           "apache-httpclient")
+           "apache-httpclient", "node-fetch")
+
+# فقط این‌ها مرورگر واقعی‌اند → صفحه HTML می‌گیرند
+_BROWSER_ENGINES = ("chrome/", "firefox/", "safari/", "edg/", "opr/",
+                    "opera", "samsungbrowser", "ucbrowser",
+                    "miuibrowser", "vivobrowser", "huaweibrowser",
+                    "yabrowser", "duckduckgo/", "edge?")
 
 _I18N = {
     "en": {
@@ -78,16 +87,19 @@ _I18N = {
 
 
 def _wants_html(request) -> bool:
+    """فقط مرورگر واقعی صفحه HTML می‌گیرد؛ بقیه فرمت اپ."""
     if request.query.get("web") == "1":
         return True
     if request.query.get("raw") == "1":
         return False
     ua = (request.headers.get("User-Agent") or "").lower()
     if not ua:
-        return False
+        return False                      # بدون UA → فرمت اپ
     if any(k in ua for k in _APP_UA):
-        return False
-    return "mozilla" in ua
+        return False                      # اپ شناخته‌شده → فرمت اپ
+    if "mozilla" in ua and any(k in ua for k in _BROWSER_ENGINES):
+        return True                       # مرورگر واقعی → HTML
+    return False                          # پیش‌فرض → فرمت اپ
 
 
 def _qr_svg(text: str) -> str:
@@ -135,8 +147,7 @@ def _render_page(c, links, sub_url, blocked):
         with open(_PAGE_PATH, "r", encoding="utf-8") as f:
             tpl = f.read()
     except OSError:
-        # قالب موجود نیست → متن خام برگردان
-        return None
+        return None    # قالب نبود → فرمت اپ برگردانده می‌شود
     blob = json.dumps({"d": data, "i": _I18N},
                       ensure_ascii=False).replace("</", "<\\/")
     return (tpl.replace("__BLOB__", blob)
