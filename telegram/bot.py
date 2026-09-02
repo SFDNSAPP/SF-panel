@@ -528,7 +528,7 @@ def cmd_notify(chat, args):
     send_message(chat, f"✅ به {n} کاربر ارسال شد.")
 
 
-def cmd_panel(chat):
+def cmd_panel(chat, args=None):
     try:
         from .handlers_admin import cmd_panel as _panel
         _panel(chat)
@@ -710,3 +710,4 @@ def start_bot():
             _poller.start()
             db.log_event("پولر ربات استارت شد", "ok")
     return _poller
+
