@@ -1,22 +1,18 @@
 'use strict';
-/* SF-Panel — app.js v2.2
-   NEW: XHTTP · Sniffing · ProxyProtocol · Extra JSON · hasInbound fix
-   Requires: i18n.js */
+/* SF-Panel — app.js FINAL (all fixes included)
+   FIX v2.2.2: hasInbound null-crash (new client form) · xhttp row */
 
-/* ---------- کلیدهای i18n جدید (به دیکشنری موجود اضافه می‌شوند) ---------- */
 Object.assign(I18N, {
   'ib.tr.xhttp':     { en: 'XHTTP (censorship-resistant)', fa: 'XHTTP (مقاوم در فیلترینگ)' },
   'ib.xhttpMode':    { en: 'XHTTP mode', fa: 'حالت XHTTP' },
-  'ib.xhttpHint':    { en: 'XHTTP works best with TLS on a real domain. Reality is not supported.', fa: 'XHTTP با TLS روی دامنه واقعی بهترین عملکرد را دارد. Reality پشتیبانی نمی‌شود.' },
+  'ib.xhttpHint':    { en: 'XHTTP works best with TLS on a real domain.', fa: 'XHTTP با TLS روی دامنه واقعی بهترین عملکرد را دارد.' },
   'ib.advanced':     { en: '⚙️ Advanced', fa: '⚙️ تنظیمات پیشرفته' },
-  'ib.sniff':        { en: 'Sniffing (protocol detection)', fa: 'Sniffing (تشخیص پروتکل)' },
   'ib.sniffOn':      { en: 'Enable sniffing', fa: 'فعال‌بودن sniffing' },
   'ib.sniffDest':    { en: 'Destinations (comma: http,tls,quic)', fa: 'مقاصد (با کاما: http,tls,quic)' },
-  'ib.sniffRoute':   { en: 'routeOnly (sniff only for routing)', fa: 'routeOnly (فقط برای مسیریابی)' },
-  'ib.proxyProt':    { en: 'Accept Proxy Protocol (behind HAProxy/CDN)', fa: 'پذیرش Proxy Protocol (پشت HAProxy/CDN)' },
-  'ib.extra':        { en: 'Extra JSON (merged into inbound — advanced)', fa: 'Extra JSON (ادغام در اینباند — حرفه‌ای)' },
-  'ib.extraPh':      { en: 'e.g. {"allocate": {"strategy": "random"}}', fa: 'مثلاً {"allocate": {"strategy": "random"}}' },
-  'fm.generate':     { en: 'Generate', fa: 'تولید' },
+  'ib.sniffRoute':   { en: 'routeOnly', fa: 'routeOnly' },
+  'ib.proxyProt':    { en: 'Accept Proxy Protocol', fa: 'پذیرش Proxy Protocol' },
+  'ib.extra':        { en: 'Extra JSON (advanced)', fa: 'Extra JSON (حرفه‌ای)' },
+  'ib.extraPh':      { en: '{"key": "value"}', fa: '{"key": "value"}' },
 });
 
 const $ = (id) => document.getElementById(id);
@@ -29,9 +25,10 @@ let PAAS = false, VIEW = 'dashboard', POLL = null, POLL_MS = 6000;
 let inboundsCache = [], clientsCache = [], chartSeries = [];
 let currentModal = null;
 
-/* FIX: مقایسه امن اینباند (string vs number) */
+/* FIX: قبلاً با c=null کرش می‌کرد → فرم کاربر جدید اصلاً باز نمی‌شد */
 function hasInbound(c, ibId) {
-    return (c && (c.inbounds || [])).some(x => Number(x) === Number(ibId));
+    if (!c) return false;
+    return (c.inbounds || []).some(x => Number(x) === Number(ibId));
 }
 
 (function () {
@@ -436,9 +433,6 @@ function renderInbounds() {
             detail = `<span class="mono">${esc(g.transport || 'ws')}</span> → <span class="mono">${esc(g.path || '')}</span>`;
         } else {
             detail = `Port <b>${esc(g.port)}</b> · <span class="mono">${esc(g.transport || 'tcp')}/${esc(g.security || 'none')}</span>`;
-            if (g.transport === 'xhttp' && g.xhttpMode) {
-                detail += `<div class="cell-sub mono">mode: ${esc(g.xhttpMode)}</div>`;
-            }
             if (g.path) detail += `<div class="cell-sub mono">${esc(g.path)}</div>`;
         }
         return `<tr>
@@ -585,7 +579,6 @@ function inboundForm(row) {
             </div>
         </div>`;
 
-    /* ---- جعبه تنظیمات پیشرفته (Sniffing / ProxyProtocol / Extra) ---- */
     const advBox = `
         <div class="adv-box">
             <div class="lbl2">${esc(I('ib.advanced'))}</div>
@@ -607,7 +600,7 @@ function inboundForm(row) {
             </div>
             <div class="f">
                 <label>${esc(I('ib.extra'))}</label>
-                <textarea id="ibExtra" rows="3" class="ltr" placeholder="${esc(I('ib.extraPh'))}">${esc(typeof g.extra === 'object' ? JSON.stringify(g.extra, null, 2) : (g.extra || ''))}</textarea>
+                <textarea id="ibExtra" rows="3" class="ltr" placeholder="${esc(I('ib.extraPh'))}">${esc(typeof g.extra === 'object' && g.extra ? JSON.stringify(g.extra, null, 2) : '')}</textarea>
             </div>
         </div>`;
 
@@ -687,14 +680,11 @@ function inboundForm(row) {
     $('ibCancel').onclick = closeModal;
     $('ibSave').onclick = async () => {
         const err = $ib('ibErr'); err.textContent = '';
-
-        /* اعتبارسنجی Extra JSON */
         let extraRaw = $ib('ibExtra').value.trim();
         if (extraRaw) {
             try { JSON.parse(extraRaw); }
             catch (e) { err.textContent = 'Extra JSON: ' + e.message; return; }
         }
-
         const cfg = { protocol: $ib('ibProto').value };
         if (PAAS) {
             cfg.transport = $ib('ibTransport').value;
@@ -838,13 +828,13 @@ function clientForm(c) {
             <div class="f"><label>${esc(I('cl.uuid'))}</label>
                 <div class="exp-flex">
                     <input id="clUuid" class="ltr" value="${esc(c ? c.uuid : '')}" placeholder="${esc(I('cl.uuidPh'))}">
-                    <button class="btn-icon" id="clUuidBtn" type="button" title="${esc(I('fm.generate'))}">🎲</button>
+                    <button class="btn-icon" id="clUuidBtn" type="button">🎲</button>
                 </div></div>
         </div>
         <div class="f"><label>${esc(I('cl.password'))}</label>
             <div class="exp-flex">
-                <input id="clPass" class="ltr" value="${esc(c ? c.password : '')}" placeholder="${esc(I('cl.uuidPh'))}">
-                <button class="btn-icon" id="clPassBtn" type="button" title="${esc(I('fm.generate'))}">🎲</button>
+                <input id="clPass" class="ltr" value="${esc(c ? c.password : '')}" placeholder="auto">
+                <button class="btn-icon" id="clPassBtn" type="button">🎲</button>
             </div></div>
         <div class="f"><label>${esc(I('cl.inbounds'))}</label>
             <div class="chk-list">${inbs.map(ib => `
@@ -978,7 +968,7 @@ function clientForm(c) {
     };
 }
 
-/* ---------- لینک‌ها با هشدار ---------- */
+/* ---------- لینک‌ها ---------- */
 async function showLinks(id) {
     openModal(I('ln.title'), `<div class="muted">${esc(I('common.loading'))}</div>`, '', true);
     try {
@@ -1012,9 +1002,9 @@ async function showLinks(id) {
                             background:rgba(255,184,77,.08);
                             border:1px solid rgba(255,184,77,.35);
                             color:#ffcd85;font-size:.83rem;line-height:2">
-                    ⚠️ <b>${isFa ? 'هیچ لینک کانفیگی ساخته نشد!' : 'No config links generated!'}</b><br>
-                    ${isFa ? 'این کاربر هیچ اینباندِ فعالی ندارد.<br>→ دکمه ✏️ را بزن، اینباند انتخاب کن، ذخیره کن'
-                           : 'This client has no enabled inbound assigned.<br>→ Press ✏️ → select inbounds → Save'}
+                    ⚠️ <b>${isFa ? 'هیچ لینک کانفیگی ساخته نشد!' : 'No config links!'}</b><br>
+                    ${isFa ? '→ دکمه ✏️ را بزن، اینباند انتخاب کن، ذخیره کن'
+                           : '→ Press ✏️ → select inbounds → Save'}
                 </div>`);
         }
 
