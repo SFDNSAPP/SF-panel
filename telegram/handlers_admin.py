@@ -4,6 +4,7 @@
 """
 
 import time
+import threading
 
 from . import db as sdb
 from . import texts
@@ -12,11 +13,19 @@ from .bot import (
     answer_cbq,
     main_kb,
     _states,
-    _states_lock,
     now_ms,
     get_role,
 )
-from .handlers_fsm import STEP_ADMIN_INPUT
+
+try:
+    from .bot import _states_lock
+except ImportError:
+    _states_lock = threading.RLock()
+
+try:
+    from .handlers_fsm import STEP_ADMIN_INPUT
+except ImportError:
+    STEP_ADMIN_INPUT = "admin_input"
 
 MSG_MAX = 3800
 
@@ -37,37 +46,58 @@ def _ok_role(chat, roles=("owner", "admin")):
 
 def cmd_panel(chat):
     tg = int(chat)
-    if not _ok_role(chat):
-        from core import database as panel_db
-        admins_raw = (panel_db.get_setting("tg_admins") or "").strip()
-        send_message(
-            chat,
-            "⛔ این بخش فقط برای مدیران است.\n\n"
-            f"آیدی عددی شما: <code>{tg}</code>\n\n"
-            "اگر مدیر هستید، این آیدی را در تنظیمات پنل وب "
-            "داخل فیلد <b>tg_admins</b> بگذارید "
-            "(چند آیدی را با کاما جدا کنید).\n\n"
-            f"مقدار فعلی tg_admins:\n<code>{texts.esc(admins_raw) or 'خالی'}</code>"
-        )
+    try:
+        if not _ok_role(chat):
+            from core import database as panel_db
+            admins_raw = (panel_db.get_setting("tg_admins") or "").strip()
+            send_message(
+                chat,
+                "⛔ این بخش فقط برای مدیران است.\n\n"
+                f"آیدی عددی شما: <code>{tg}</code>\n\n"
+                "اگر مدیر هستید، آیدی را در Settings پنل وب "
+                "داخل <b>tg_admins</b> بگذارید.\n\n"
+                f"مقدار فعلی:\n<code>{texts.esc(admins_raw) or 'خالی'}</code>"
+            )
+            return
+    except Exception as e:
+        send_message(chat, f"خطا در بررسی نقش: {e}")
         return
-    with _states_lock:
-        _states.pop(tg, None)
 
-    pending = sdb.q(
-        "SELECT COUNT(*) n FROM receipts WHERE status='pending'", one=True
-    )["n"]
-    users_n = sdb.q("SELECT COUNT(*) n FROM users", one=True)["n"]
-    open_t = sdb.q(
-        "SELECT COUNT(*) n FROM tickets WHERE status='open'", one=True
-    )["n"]
+    try:
+        with _states_lock:
+            _states.pop(tg, None)
+    except Exception:
+        try:
+            _states.pop(tg, None)
+        except Exception:
+            pass
+
+    pending = users_n = open_t = 0
+    try:
+        r = sdb.q(
+            "SELECT COUNT(*) n FROM receipts WHERE status='pending'",
+            one=True,
+        )
+        pending = (r or {}).get("n") or 0
+    except Exception:
+        pass
+    try:
+        r = sdb.q("SELECT COUNT(*) n FROM users", one=True)
+        users_n = (r or {}).get("n") or 0
+    except Exception:
+        pass
+    try:
+        r = sdb.q(
+            "SELECT COUNT(*) n FROM tickets WHERE status='open'", one=True
+        )
+        open_t = (r or {}).get("n") or 0
+    except Exception:
+        pass
 
     kb = {
         "inline_keyboard": [
             [
-                {
-                    "text": f"🧾 رسیدها ({pending})",
-                    "callback_data": "adm:rcps",
-                },
+                {"text": f"🧾 رسیدها ({pending})", "callback_data": "adm:rcps"},
                 {"text": "📊 آمار", "callback_data": "adm:stats"},
             ],
             [
@@ -76,10 +106,7 @@ def cmd_panel(chat):
             ],
             [
                 {"text": "🎟 کد تخفیف", "callback_data": "adm:coupons"},
-                {
-                    "text": f"💬 تیکت‌ها ({open_t})",
-                    "callback_data": "adm:tickets",
-                },
+                {"text": f"💬 تیکت‌ها ({open_t})", "callback_data": "adm:tickets"},
             ],
             [{"text": "⚙️ تنظیمات", "callback_data": "adm:settings"}],
             [
@@ -89,16 +116,24 @@ def cmd_panel(chat):
             [{"text": "🔙 منو", "callback_data": "menu"}],
         ]
     }
-    role = "Owner 👑" if get_role(tg) == "owner" else "Admin"
-    send_message(
-        chat,
-        (
-            f"👑 <b>پنل مدیریت</b> — {role}\n\n"
-            f"🧾 رسید در انتظار: <b>{pending}</b>\n"
-            f"👥 کاربران: <b>{users_n}</b> · 💬 تیکت باز: <b>{open_t}</b>"
-        ),
-        reply_markup=kb,
-    )
+    role = "Owner" if get_role(tg) == "owner" else "Admin"
+    try:
+        send_message(
+            chat,
+            (
+                f"👑 پنل مدیریت — {role}\n\n"
+                f"🧾 رسید در انتظار: {pending}\n"
+                f"👥 کاربران: {users_n}\n"
+                f"💬 تیکت باز: {open_t}"
+            ),
+            reply_markup=kb,
+        )
+    except Exception as e:
+        # اگر HTML/کیبورد مشکل داشت، ساده بفرست
+        send_message(
+            chat,
+            f"پنل مدیریت ({role})\nرسید:{pending} کاربران:{users_n} تیکت:{open_t}\nخطا: {e}",
+        )
 
 
 # ================================================== روتر
