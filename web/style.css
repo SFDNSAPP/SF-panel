@@ -1,7 +1,6 @@
 /* ═══════════════════════════════════════════════════════════
-   SF-Panel — style.css  v2.1
+   SF-Panel — style.css  v2.2.2  (ALL FIXES INCLUDED)
    Theme: Neon Green / Black Glass
-   Fixes: canvas growth · RTL/LTR sidebar · grid blowout · tables
    ═══════════════════════════════════════════════════════════ */
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -54,13 +53,12 @@ body {
 .muted { color: var(--tx2); }
 .hidden { display: none !important; }
 
-/* ═════════════════ FIX: گرید و کارت‌ها هرگز منفجر نشوند ═════════════════ */
+/* ═══ FIX: گرید و کارت‌ها هرگز منفجر نشوند ═══ */
 .grid > *, .g-main > *, .main > *, #view > * { min-width: 0; }
 .card { overflow: hidden; }
 
-/* ═════════════════ FIX: نمودار — اندازه فقط از CSS ═════════════════ */
+/* ═══ FIX: نمودار — اندازه فقط از CSS ═══ */
 #chart { width: 100%; height: 180px; display: block; max-width: 100%; }
-.chart-holder { width: 100%; min-width: 0; }
 
 /* ---------- دکمه‌ها ---------- */
 .btn {
@@ -113,7 +111,7 @@ body {
   font-family: inherit; font-size: .92rem; outline: none; transition: all .2s;
   max-width: 100%;
 }
-.f input:focus, .f select:focus {
+.f input:focus, .f select:focus, .f textarea:focus {
   border-color: rgba(0, 255, 157, .6);
   box-shadow: 0 0 0 3px rgba(0, 255, 157, .18);
 }
@@ -127,15 +125,29 @@ body {
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
 .form-grid .full { grid-column: 1 / -1; }
 
-.sw-row { display: flex; align-items: center; gap: 10px; font-size: .85rem; color: var(--tx2); }
-.sw { position: relative; display: inline-block; width: 42px; height: 24px; flex-shrink: 0; }
+/* ═══ FIX: سوییچ جهت‌آگاه — در LTR و RTL داخل کادر می‌ماند ═══ */
+.sw-row { display: flex; align-items: center; gap: 10px; font-size: .85rem;
+          color: var(--tx2); flex-wrap: wrap; }
+.sw { position: relative; display: inline-block; width: 42px; height: 24px;
+      flex: 0 0 auto; }
 .sw input { display: none; }
-.sw span { position: absolute; inset: 0; border-radius: 99px; cursor: pointer;
-           background: rgba(0, 255, 157, .12); border: 1px solid var(--bd); transition: .25s; }
-.sw span::after { content: ''; position: absolute; top: 3px; inset-inline-start: 3px;
-                  width: 16px; height: 16px; border-radius: 50%; background: #7d9a8b; transition: .25s; }
-.sw input:checked + span { background: rgba(0, 255, 157, .4); border-color: rgba(0, 255, 157, .55); }
-.sw input:checked + span::after { transform: translateX(-18px); background: #04231a; }
+.sw span {
+  position: absolute; inset: 0; border-radius: 99px; cursor: pointer;
+  background: rgba(0, 255, 157, .12); border: 1px solid var(--bd);
+  transition: .25s;
+}
+.sw span::after {
+  content: ''; position: absolute; top: 3px; inset-inline-start: 3px;
+  width: 16px; height: 16px; border-radius: 50%; background: #7d9a8b;
+  transition: inset-inline-start .25s ease, background .25s ease;
+}
+.sw input:checked + span {
+  background: rgba(0, 255, 157, .4); border-color: rgba(0, 255, 157, .55);
+}
+.sw input:checked + span::after {
+  inset-inline-start: 23px; background: #04231a;
+}
+td .sw { flex: 0 0 auto; }
 
 /* ---------- Pill و Badge ---------- */
 .pill {
@@ -190,7 +202,8 @@ body {
   box-shadow: 0 0 30px rgba(0, 255, 157, .5);
 }
 .brand h1 { font-size: 1.4rem; font-weight: 800; color: #d9ffee; }
-.brand small, .brand .v { color: var(--tx2); font-size: .7rem; display: block; margin-top: 3px; }
+.brand small, .brand .v { color: var(--tx2); font-size: .7rem; display: block;
+                         margin-top: 3px; }
 .auth-foot { display: flex; justify-content: space-between; align-items: center;
              margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--bd); }
 .auth-foot .ver { font-size: .7rem; color: var(--tx3); }
@@ -206,7 +219,8 @@ body {
   position: sticky; top: 0; height: 100vh; z-index: 50;
 }
 .sidebar .brand { padding: 22px 20px 18px; margin-bottom: 0; }
-.sidebar .brand .mark { width: 42px; height: 42px; font-size: 1.05rem; border-radius: 12px; }
+.sidebar .brand .mark { width: 42px; height: 42px; font-size: 1.05rem;
+                        border-radius: 12px; }
 .sidebar .brand b { font-size: 1.05rem; color: #d9ffee; }
 
 #nav { padding: 8px 12px; display: flex; flex-direction: column; gap: 4px;
@@ -266,7 +280,8 @@ body {
 .g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.g-main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 14px; }
+.g-main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+          gap: 14px; }
 
 /* ---------- آمار ---------- */
 .stat .lbl { font-size: .8rem; color: var(--tx2); margin-bottom: 10px;
@@ -288,9 +303,11 @@ body {
           font-variant-numeric: tabular-nums; }
 
 /* ---------- نمودار ---------- */
-.legend { display: flex; gap: 18px; margin-top: 12px; font-size: .75rem; color: var(--tx2); }
+.legend { display: flex; gap: 18px; margin-top: 12px; font-size: .75rem;
+          color: var(--tx2); }
 .legend span { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
-.lg { width: 12px; height: 12px; border-radius: 4px; display: inline-block; flex-shrink: 0; }
+.lg { width: 12px; height: 12px; border-radius: 4px; display: inline-block;
+      flex-shrink: 0; }
 .lg-up { background: var(--pri2); }
 .lg-down { background: #39d0ff; }
 
@@ -300,8 +317,7 @@ body {
       font-size: .82rem; }
 .kv:last-child { border-bottom: none; }
 .kv span { color: var(--tx3); flex-shrink: 0; }
-.kv b { font-weight: 600; text-align: end; overflow-wrap: anywhere;
-        min-width: 0; }
+.kv b { font-weight: 600; text-align: end; overflow-wrap: anywhere; min-width: 0; }
 
 /* ---------- رویدادها ---------- */
 .events { list-style: none; display: flex; flex-direction: column; gap: 2px; }
@@ -325,7 +341,7 @@ body {
   outline: none; transition: border-color .2s; }
 .search:focus { border-color: rgba(0, 255, 157, .6); }
 
-/* ---------- جدول — FIX: حداقل عرض + اسکرول، نه له‌شدن ---------- */
+/* ---------- جدول ═══ FIX: اسکرول افقی، نه له‌شدن ═══ */
 .tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: .85rem; }
 th { color: var(--tx2); font-weight: 600; font-size: .72rem;
@@ -411,7 +427,8 @@ td .tag-list { display: flex; flex-wrap: wrap; gap: 5px; max-width: 220px; }
 
 /* ---------- توست ---------- */
 .toasts { position: fixed; bottom: 20px; inset-inline-start: 20px; z-index: 200;
-  display: flex; flex-direction: column; gap: 10px; max-width: min(340px, calc(100vw - 32px)); }
+  display: flex; flex-direction: column; gap: 10px;
+  max-width: min(340px, calc(100vw - 32px)); }
 .toast { padding: 12px 18px; border-radius: var(--r2); font-size: .82rem;
   font-weight: 600; background: #06231a; border: 1px solid var(--bd2);
   box-shadow: 0 0 24px -8px rgba(0, 255, 157, .35);
@@ -433,23 +450,23 @@ td .tag-list { display: flex; flex-wrap: wrap; gap: 5px; max-width: 220px; }
   .g-main { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* ═══ FIX: منوی موبایل — جهت‌آگاه، دیگر خودش باز نمی‌ماند ═══ */
+/* ═══ FIX: منوی موبایل جهت‌آگاه ═══ */
 @media (max-width: 860px) {
   .only-mobile { display: inline-flex; }
   .sidebar {
     position: fixed; top: 0; height: 100dvh; z-index: 60;
     inset-inline-start: 0;
-    transform: translateX(-110%);          /* LTR: پنهان در چپ */
+    transform: translateX(-110%);
     transition: transform .28s ease;
     box-shadow: 0 0 50px rgba(0, 0, 0, .6);
   }
-  [dir="rtl"] .sidebar { transform: translateX(110%); }  /* RTL: پنهان در راست */
+  [dir="rtl"] .sidebar { transform: translateX(110%); }
   .sidebar.open { transform: translateX(0); }
 
   #view { padding: 14px; }
   .topbar { padding: 10px 14px; gap: 10px; }
   .topbar .sub { display: none; }
-  #modePill { display: none; }             /* در موبایل حذف — جای صفحه نگیرد */
+  #modePill { display: none; }
   .g3, .g2 { grid-template-columns: minmax(0, 1fr); }
   .chips-row.g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .modal-body { padding: 16px; }
@@ -474,29 +491,4 @@ td .tag-list { display: flex; flex-wrap: wrap; gap: 5px; max-width: 220px; }
     animation-duration: .01ms !important;
     transition-duration: .01ms !important;
   }
-       }
-
-/* ═══ FIX v2.2: سوییچ جهت-آگاه — دستگیره دیگر بیرون نمی‌زند ═══ */
-.sw span::after {
-  inset-inline-start: 3px;
-  transform: none;
-  transition: inset-inline-start .25s ease, background .25s ease;
-}
-.sw input:checked + span::after {
-  inset-inline-start: 23px;
-  transform: none;
-  background: #04231a;
-}
-td .sw { flex: 0 0 auto; }
-/* ═══ FIX: سوییچ جهت‌آگاه ═══ */
-.sw span::after {
-  inset-inline-start: 3px;
-  transform: none;
-  transition: inset-inline-start .25s ease, background .25s ease;
-}
-.sw input:checked + span::after {
-  inset-inline-start: 23px;
-  transform: none;
-  background: #04231a;
-}
-td .sw { flex: 0 0 auto; }
+              }
