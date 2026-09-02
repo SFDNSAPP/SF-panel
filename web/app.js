@@ -530,7 +530,7 @@ function inboundForm(row) {
             <div class="f" id="ibHostRow"><label>${esc(I('ib.host'))}</label>
                 <input id="ibHost" class="ltr" value="${esc(g.host || '')}"></div>
         </div>
-        <div class="f" id="ibXhttpRow" class="hidden">
+        <div class="f hidden" id="ibXhttpRow">
             <label>${esc(I('ib.xhttpMode'))}</label>
             <select id="ibXhttpMode">${xhModes}</select>
             <div class="hint">${esc(I('ib.xhttpHint'))}</div>
