@@ -339,7 +339,6 @@ def cb_pay(tg: int, pid: str):
     # ۲. ساخت اکانت
     acc, err = panel_link.create_account(tg, p["days"], p["limit_gb"])
     if err or not acc:
-        # برگشت پول
         try:
             sdb.balance_add(tg, final, "refund", f"خطا در ساخت اکانت: {err}")
         except Exception:
@@ -350,14 +349,32 @@ def cb_pay(tg: int, pid: str):
         )
         return
 
-    # ۳. ثبت کوپن
-    if coupon_code:
+    # ۳. اول از همه تحویل کانفیگ (قبل از هر کار دیگر)
+    try:
+        _send_account_details(tg, acc, p["days"], p["limit_gb"])
+    except Exception as e:
+        # حداقل لینک ساب را حتماً بفرست
         try:
-            sdb.coupon_commit(coupon_code, tg)
+            base = base_url()
+            sub_url = f"{base}/sub/{acc.get('sub_id', '')}"
+            send_message(
+                tg,
+                f"✅ خرید انجام شد\n\n"
+                f"اکانت: <code>{acc.get('email')}</code>\n"
+                f"ساب:\n<code>{sub_url}</code>\n\n"
+                f"(خطای جزئی: {e})",
+                reply_markup=main_kb(),
+            )
         except Exception:
-            pass
+            send_message(tg, f"✅ خرید شد — sub_id: {acc.get('sub_id')}")
 
-    # ۴. ثبت در bot_accounts
+    # ۴. بقیه کارها (اگر خطا خورد، کانفیگ قبلاً رفته)
+    try:
+        if coupon_code:
+            sdb.coupon_commit(coupon_code, tg)
+    except Exception:
+        pass
+
     try:
         sdb.ex(
             "UPDATE users SET buys_count = buys_count + 1 WHERE tg_id=?",
@@ -376,39 +393,28 @@ def cb_pay(tg: int, pid: str):
                 now_ms(),
             ),
         )
-    except Exception as e:
-        try:
-            from core import database as pdb
-            pdb.log_event(f"bot_accounts insert: {e}", "err")
-        except Exception:
-            pass
+    except Exception:
+        pass
 
-    # ۵. پاداش ریفرال (نباید خرید را خراب کند)
     try:
         if u.get("ref_by"):
             percent = int(sdb.get_setting("ref_percent", "20"))
             reward = final * percent // 100
             if reward > 0:
                 sdb.balance_add(
-                    u["ref_by"],
-                    reward,
-                    "referral",
-                    f"خرید زیرمجموعه {tg}",
+                    u["ref_by"], reward, "referral", f"خرید زیرمجموعه {tg}"
                 )
                 sdb.ex(
-                    "UPDATE users SET ref_earnings = ref_earnings + ? "
-                    "WHERE tg_id=?",
+                    "UPDATE users SET ref_earnings = ref_earnings + ? WHERE tg_id=?",
                     (reward, u["ref_by"]),
                 )
                 send_message(
                     u["ref_by"],
-                    f"🤝 خرید زیرمجموعه‌ات ثبت شد!\n"
-                    f"<b>{reward:,} تومان</b> به کیف پولت اضافه شد.",
+                    f"🤝 پاداش ریفرال: <b>{reward:,}</b> تومان",
                 )
     except Exception:
         pass
 
-    # ۶. پاک کردن state
     try:
         with _states_lock:
             _states.pop(tg, None)
@@ -417,9 +423,6 @@ def cb_pay(tg: int, pid: str):
             _states.pop(tg, None)
         except Exception:
             pass
-
-    # ۷. تحویل کانفیگ (حتماً)
-    _send_account_details(tg, acc, p["days"], p["limit_gb"])
 
 
 # ---------------- اکانت تست ----------------
@@ -532,3 +535,4 @@ def cb_support(tg: int):
     with _states_lock:
         _states[tg] = {"step": STEP_SUPPORT, "data": {}}
     send_message(tg, texts.T["support_ask"])
+
