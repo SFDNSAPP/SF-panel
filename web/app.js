@@ -1,5 +1,6 @@
 'use strict';
-/* SF-Panel — app.js (i18n · neon) — requires i18n.js */
+/* SF-Panel — app.js FINAL (i18n · neon · chart-fix · links-warning)
+   Requires: i18n.js */
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;')
@@ -193,7 +194,7 @@ async function doLogin() {
         enterApp();
     } catch (e) {
         const m = e.message || '';
-        if (m.includes('دومرحله') || m.includes('کد') || m.includes('2FA')) {
+        if (m.includes('دومرحله') || m.includes('کد') || m.toLowerCase().includes('2fa')) {
             $('totpField').classList.remove('hidden');
             $('authCode').focus();
             $('authErr').textContent = I('auth.enter2fa');
@@ -333,13 +334,11 @@ function renderDashboard(d) {
     chartSeries = d.series || [];
     drawChart();
 }
+/* FIX: اندازه فقط از CSS؛ JS فقط رزولوشن — دیگر رشد نمی‌کند */
 function drawChart() {
     const cv = $('chart');
     if (!cv) return;
     const ctx = cv.getContext('2d');
-    /* FIX: اندازه نمایشی فقط از CSS می‌آید (width:100%, height:180px).
-       اینجا فقط رزولوشن داخلی ست می‌شود — هرگز style.width نه!
-       (قبلاً style.width باعث رشد بی‌نهایت کانواس و ترکیدن گرید می‌شد) */
     const w = cv.clientWidth || 600;
     const h = 180;
     if (w < 10) return;
@@ -359,9 +358,7 @@ function drawChart() {
         ctx.fillText(I('dash.waiting'), w / 2, h / 2);
         return;
     }
-    const max = Math.max(2048, ...data.map(p =>
-        Math.max(p.up || 0, p.d || 0))) * 1.18;
-
+    const max = Math.max(2048, ...data.map(p => Math.max(p.up || 0, p.d || 0))) * 1.18;
     for (let i = 0; i <= 4; i++) {
         const y = padT + ih - (ih * i / 4);
         ctx.strokeStyle = 'rgba(0,255,157,.08)';
@@ -370,7 +367,6 @@ function drawChart() {
         ctx.textAlign = 'left';
         ctx.fillText(fmtBytes(max * i / 4), 2, y + 3);
     }
-
     const step = iw / (data.length - 1);
     const drawSeries = (key, color) => {
         ctx.beginPath();
@@ -385,7 +381,6 @@ function drawChart() {
     };
     drawSeries('up', '#00ffd1');
     drawSeries('d',  '#39d0ff');
-
     ctx.fillStyle = '#5d7a6b'; ctx.font = '9px monospace';
     ctx.textAlign = 'center';
     const every = Math.max(1, Math.floor(data.length / 6));
@@ -470,8 +465,7 @@ function inboundForm(row) {
     const protoOpts = ['vless', 'vmess', 'trojan', 'shadowsocks']
         .map(p => `<option value="${p}" ${proto === p ? 'selected' : ''}
             ${PAAS && p === 'shadowsocks' ? 'disabled' : ''}>${p.toUpperCase()}</option>`).join('');
-    const trKeys = PAAS ? ['ws', 'httpupgrade']
-                         : ['tcp', 'ws', 'grpc', 'httpupgrade'];
+    const trKeys = PAAS ? ['ws', 'httpupgrade'] : ['tcp', 'ws', 'grpc', 'httpupgrade'];
     const trSel = g.transport || (PAAS ? 'ws' : 'tcp');
     const trOpts = trKeys.map(v =>
         `<option value="${v}" ${trSel === v ? 'selected' : ''}>${esc(I('ib.tr.' + v, v))}</option>`).join('');
@@ -897,10 +891,12 @@ function clientForm(c) {
     };
 }
 
+/* FIX: اگر لینکی نبود، علت فارسی/انگلیسی نوشته می‌شود */
 async function showLinks(id) {
     openModal(I('ln.title'), `<div class="muted">${esc(I('common.loading'))}</div>`, '', true);
     try {
         const d = await api(`/api/clients/${id}/links`);
+        const isFa = LANG === 'fa';
         const body = [];
         body.push(`
             <div class="kv"><span>${esc(I('ln.status'))}</span>
@@ -922,6 +918,19 @@ async function showLinks(id) {
             <div class="copybox mono" id="lnBind">${esc(d.bind_code)}</div>
             <button class="btn btn-sm" id="lnBindCopy">${esc(I('ln.copyBind'))}</button>
             <div class="lbl2" style="margin-top:18px">${esc(I('ln.singleLinks'))}</div>`);
+
+        if (!(d.links || []).length) {
+            body.push(`
+                <div style="padding:14px;border-radius:12px;
+                            background:rgba(255,184,77,.08);
+                            border:1px solid rgba(255,184,77,.35);
+                            color:#ffcd85;font-size:.83rem;line-height:2">
+                    ⚠️ <b>${isFa ? 'هیچ لینک کانفیگی ساخته نشد!' : 'No config links generated!'}</b><br>
+                    ${isFa ? 'این کاربر هیچ اینباندِ فعالی ندارد.<br>→ دکمه ✏️ را بزن، اینباند انتخاب کن، ذخیره کن'
+                           : 'This client has no enabled inbound assigned.<br>→ Press ✏️ → select inbounds → Save'}
+                </div>`);
+        }
+
         (d.links || []).forEach((l, i) => {
             body.push(`
                 <div class="link-item">
@@ -1043,7 +1052,6 @@ function bindSettingsEvents() {
         try {
             const r = await api('/api/settings/tg-test', { method: 'POST' });
             $('tgTestResult').textContent = I('st.tgOk', r.bot);
-            toast(I('st.tgOk', r.bot), 'ok');
         } catch (err) {
             $('tgTestResult').textContent = I('st.tgFail', err.message);
         } finally { btnLoad(e.target, false); }
@@ -1249,7 +1257,7 @@ function bindGlobalEvents() {
     $('mobileMenu').onclick = () =>
         $('sidebar').classList.contains('open') ? closeSidebar() : openSidebar();
     $('langBtn').onclick = toggleLang;
-    $('langBtnAuth').onclick = toggleLang;
+    if ($('langBtnAuth')) $('langBtnAuth').onclick = toggleLang;
 
     $('btnAddInbound').onclick = () => inboundForm(null);
     $('btnAddClient').onclick = () => {
