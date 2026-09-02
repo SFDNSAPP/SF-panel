@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""پل مستقیم ربات ↔ پنل (همان پروسه — بدون API/توکن):
-ساخت/تمدید اکانت، لینک‌ها، مصرف — مستقیم از core
+"""پل مستقیم ربات ↔ پنل
+ساخت/تمدید اکانت، لینک‌ها — مستقیم از core
+FIX: ایمپورت درست instance از core.xray
 """
 
 import uuid as uuidlib
 
 from core import database as pdb
-from core import xray
+from core.xray import xray          # ← instance درست (نه خود ماژول)
 from core.security import random_token, random_password
 from core.utils import dump_json, now_ms
 from core.link_builder import client_links
@@ -48,7 +49,7 @@ def create_account(tg_id: int, days: int, limit_gb: int):
                 0,
                 0,
                 1,
-                str(tg_id),          # ← درست ذخیره می‌شود
+                str(tg_id),
                 sub_id,
                 "خرید از ربات",
                 0,
@@ -60,15 +61,21 @@ def create_account(tg_id: int, days: int, limit_gb: int):
     except Exception as e:
         return None, f"خطا در ثبت اکانت: {e}"
 
-    ok, err = xray.restart("خرید از ربات")
+    try:
+        ok, err = xray.restart("خرید از ربات")
+    except Exception as e:
+        ok, err = False, str(e)
+
     if not ok:
-        # rollback
         try:
             pdb.ex("DELETE FROM clients WHERE id=?", (cid,))
-            xray.restart("rollback خرید")
+            try:
+                xray.restart("rollback خرید")
+            except Exception:
+                pass
         except Exception:
             pass
-        return None, "خطای سرور در فعال‌سازی هسته. چند لحظه بعد دوباره امتحان کن."
+        return None, f"خطای سرور در فعال‌سازی هسته: {err or 'نامشخص'}"
 
     c = pdb.q("SELECT * FROM clients WHERE id=?", (cid,), one=True)
     links = []
@@ -77,6 +84,7 @@ def create_account(tg_id: int, days: int, limit_gb: int):
             links = client_links(c)
     except Exception:
         links = []
+
     return {
         "email": email,
         "sub_id": sub_id,
