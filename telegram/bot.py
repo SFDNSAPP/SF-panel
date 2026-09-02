@@ -190,9 +190,28 @@ def back_kb():
 
 # ================================================== دستورات اصلی
 
-def cmd_start(chat, args, username=""):
+def _extract_ref_code(args) -> str:
+    """استخراج کد ریفرال از آرگومان‌های /start"""
+    if not args:
+        return ""
+    raw = str(args[0] or "").strip()
+    # حالت‌های مختلف: r1a2b3c | start=r1a2b3c | =r1a2b3c
+    if "=" in raw:
+        raw = raw.split("=", 1)[-1].strip()
+    raw = raw.strip().lstrip("/")
+    # فقط کدهای معتبر shop: r + 6 hex
+    if re.match(r"^r[0-9a-fA-F]{6}$", raw):
+        return raw.lower()
+    return ""
+
+
+def cmd_start(chat, args=None, username=""):
     tg = int(chat)
-    with _states_lock:
+    args = args or []
+    try:
+        with _states_lock:
+            _states.pop(tg, None)
+    except Exception:
         _states.pop(tg, None)
 
     u = sdb.ensure_user(tg, username)
@@ -200,18 +219,24 @@ def cmd_start(chat, args, username=""):
         send_message(chat, texts.T["blocked"])
         return
 
-    # ریفرال
-    if args:
-        code = args[0].strip()
-        if re.match(r"^r[0-9a-f]{6}$", code) and not u.get("ref_by"):
-            inviter = sdb.q(
-                "SELECT tg_id FROM users WHERE ref_code=?", (code,), one=True
+    # ریفرال — فقط بار اول
+    code = _extract_ref_code(args)
+    if code and not u.get("ref_by"):
+        inviter = sdb.q(
+            "SELECT tg_id FROM users WHERE ref_code=?", (code,), one=True
+        )
+        if inviter and inviter["tg_id"] != tg:
+            sdb.ex(
+                "UPDATE users SET ref_by=? WHERE tg_id=?",
+                (inviter["tg_id"], tg),
             )
-            if inviter and inviter["tg_id"] != tg:
-                sdb.ex(
-                    "UPDATE users SET ref_by=? WHERE tg_id=?",
-                    (inviter["tg_id"], tg),
+            try:
+                send_message(
+                    inviter["tg_id"],
+                    f"🎉 یک نفر با لینک دعوت تو وارد ربات شد!",
                 )
+            except Exception:
+                pass
 
     title = sdb.get_setting("shop_title", "SF VPN Shop")
     send_message(
@@ -546,19 +571,24 @@ def route_message(chat: str, text: str, username: str = ""):
         send_message(chat, texts.T["blocked"])
         return
 
-    low = text.split("@", 1)[0].lower()
-    parts = text.split()
+    raw = (text or "").strip()
+    parts = raw.split()
+    # جدا کردن @botname از دستور
+    first = (parts[0] if parts else "").split("@", 1)[0].strip()
+    low = first.lower()
 
-    # اول FSM را چک کن
-    with _states_lock:
-        if tg in _states:
-            try:
-                from .handlers_fsm import route_fsm
-                if route_fsm(tg, text, _states):
-                    return
-            except Exception:
-                db.log_event(traceback.format_exc(limit=4), "err")
-                _states.pop(tg, None)
+    # اول FSM — ولی /start همیشه اولویت دارد (ریفرال)
+    is_start = low == "/start" or low.startswith("/start=")
+    if not is_start:
+        with _states_lock:
+            if tg in _states:
+                try:
+                    from .handlers_fsm import route_fsm
+                    if route_fsm(tg, text, _states):
+                        return
+                except Exception:
+                    db.log_event(traceback.format_exc(limit=4), "err")
+                    _states.pop(tg, None)
 
     if len(parts) == 1 and BIND_CODE_RE.match(low):
         cmd_bind(chat, [low])
@@ -568,8 +598,15 @@ def route_message(chat: str, text: str, username: str = ""):
         send_message(chat, texts.T["start_help"])
         return
 
-    cmd = low.split("@")[0]
-    args = parts[1:]
+    # آرگومان‌ها
+    if low.startswith("/start="):
+        # حالت /start=CODE
+        payload = first.split("=", 1)[-1]
+        args = [payload] if payload else []
+        cmd = "/start"
+    else:
+        cmd = low
+        args = parts[1:] if len(parts) > 1 else []
 
     if cmd == "/start":
         cmd_start(chat, args, username)
