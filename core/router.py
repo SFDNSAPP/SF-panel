@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""روتر Layer-4 — v4 SELF-HEALING
-هر اتصال، مسیرها را با کش ۳ ثانیه از دیتابیس می‌خواند —
-هر تغییری (حتی از کنسول) بلافاصله روی روتر زنده اعمال می‌شود.
+"""ط±ظˆطھط± Layer-4 â€” v4 SELF-HEALING
+ظ‡ط± ط§طھطµط§ظ„طŒ ظ…ط³غŒط±ظ‡ط§ ط±ط§ ط¨ط§ ع©ط´ غ³ ط«ط§ظ†غŒظ‡ ط§ط² ط¯غŒطھط§ط¨غŒط³ ظ…غŒâ€Œط®ظˆط§ظ†ط¯ â€”
+ظ‡ط± طھط؛غŒغŒط±غŒ (ط­طھغŒ ط§ط² ع©ظ†ط³ظˆظ„) ط¨ظ„ط§ظپط§طµظ„ظ‡ ط±ظˆغŒ ط±ظˆطھط± ط²ظ†ط¯ظ‡ ط§ط¹ظ…ط§ظ„ ظ…غŒâ€Œط´ظˆط¯.
 """
 
 import asyncio
@@ -25,7 +25,7 @@ class Router:
         self.total_relayed = 0
         self._last_refresh = 0.0
 
-    # ---------------- مسیرها ----------------
+    # ---------------- ظ…ط³غŒط±ظ‡ط§ ----------------
 
     def refresh(self):
         routes = {}
@@ -56,42 +56,58 @@ class Router:
         return [{"path": p, "internal_port": port}
                 for p, port in sorted(self._routes.items())]
 
-    # ---------------- سرویس ----------------
+    # ---------------- ط³ط±ظˆغŒط³ ----------------
 
     async def serve(self, host="0.0.0.0", port=None):
         port = cfg.PUBLIC_PORT if port is None else port
         self.refresh()
         self._server = await asyncio.start_server(
             self._handle, host, port, limit=1 << 20)
-        db.log_event(f"روتر L4 روی {host}:{port} فعال شد "
-                     f"({len(self._routes)} مسیر پروکسی)", "ok")
+        db.log_event(f"ط±ظˆطھط± L4 ط±ظˆغŒ {host}:{port} ظپط¹ط§ظ„ ط´ط¯ "
+                     f"({len(self._routes)} ظ…ط³غŒط± ظ¾ط±ظˆع©ط³غŒ)", "ok")
         async with self._server:
             await self._server.serve_forever()
 
-    # ---------------- هندلر ----------------
+    # ---------------- ظ‡ظ†ط¯ظ„ط± ----------------
 
     async def _handle(self, reader, writer):
         self.active += 1
+        peer = writer.get_extra_info("peername")
         try:
             head = await self._read_head(reader)
             if not head:
+                db.log_event(f"DEBUG router: empty head from {peer}", "warn")
                 return
             parsed = self._parse(head)
             if parsed is None:
+                preview = head[:300].decode("latin-1", "replace")
+                db.log_event(
+                    f"DEBUG router: PARSE FAILED from {peer} | "
+                    f"raw_head={preview!r}", "err")
                 await self._respond(writer, 400, b"SF-Router: Bad Request")
                 return
             _method, path, upgrade = parsed
+            db.log_event(
+                f"DEBUG router: from {peer} method={_method} path={path} "
+                f"upgrade={upgrade!r}", "info")
             if upgrade in _PROXY_UPGRADES:
                 port = self.route_for(path)
                 if port is None:
+                    db.log_event(
+                        f"DEBUG router: NO ROUTE for path={path} "
+                        f"known_routes={list(self._routes.keys())}", "err")
                     await self._respond(writer, 404, b"SF-Router: Not Found")
                     return
+                db.log_event(
+                    f"DEBUG router: relaying {peer} path={path} "
+                    f"-> 127.0.0.1:{port}", "info")
                 await self._relay(reader, writer, port, head)
             else:
                 await self._relay(reader, writer, self.panel_port, head)
         except (ConnectionError, asyncio.TimeoutError,
-                asyncio.IncompleteReadError, asyncio.LimitOverrunError):
-            pass
+                asyncio.IncompleteReadError, asyncio.LimitOverrunError) as e:
+            db.log_event(f"DEBUG router: conn error from {peer}: "
+                         f"{type(e).__name__}", "warn")
         except Exception as e:
             db.log_event(f"router: {e}", "err")
         finally:
@@ -101,7 +117,7 @@ class Router:
             except Exception:
                 pass
 
-    # ---------------- اجزا ----------------
+    # ---------------- ط§ط¬ط²ط§ ----------------
 
     async def _read_head(self, reader):
         buf = b""
