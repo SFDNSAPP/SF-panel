@@ -337,10 +337,15 @@ function drawChart() {
     const cv = $('chart');
     if (!cv) return;
     const ctx = cv.getContext('2d');
-    const w = cv.parentElement.clientWidth || 600, h = 180;
-    const dpr = window.devicePixelRatio || 1;
-    cv.width = w * dpr; cv.height = h * dpr;
-    cv.style.width = w + 'px'; cv.style.height = h + 'px';
+    /* FIX: اندازه نمایشی فقط از CSS می‌آید (width:100%, height:180px).
+       اینجا فقط رزولوشن داخلی ست می‌شود — هرگز style.width نه!
+       (قبلاً style.width باعث رشد بی‌نهایت کانواس و ترکیدن گرید می‌شد) */
+    const w = cv.clientWidth || 600;
+    const h = 180;
+    if (w < 10) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
@@ -354,7 +359,9 @@ function drawChart() {
         ctx.fillText(I('dash.waiting'), w / 2, h / 2);
         return;
     }
-    const max = Math.max(2048, ...data.map(p => Math.max(p.up || 0, p.d || 0))) * 1.18;
+    const max = Math.max(2048, ...data.map(p =>
+        Math.max(p.up || 0, p.d || 0))) * 1.18;
+
     for (let i = 0; i <= 4; i++) {
         const y = padT + ih - (ih * i / 4);
         ctx.strokeStyle = 'rgba(0,255,157,.08)';
@@ -363,6 +370,7 @@ function drawChart() {
         ctx.textAlign = 'left';
         ctx.fillText(fmtBytes(max * i / 4), 2, y + 3);
     }
+
     const step = iw / (data.length - 1);
     const drawSeries = (key, color) => {
         ctx.beginPath();
@@ -376,7 +384,8 @@ function drawChart() {
         ctx.closePath(); ctx.fillStyle = color + '22'; ctx.fill();
     };
     drawSeries('up', '#00ffd1');
-    drawSeries('d', '#39d0ff');
+    drawSeries('d',  '#39d0ff');
+
     ctx.fillStyle = '#5d7a6b'; ctx.font = '9px monospace';
     ctx.textAlign = 'center';
     const every = Math.max(1, Math.floor(data.length / 6));
