@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""تولید لینک‌های اشتراک (vless/vmess/trojan/ss) و بدنه Subscription."""
+"""تولید لینک‌های اشتراک — v2.2.1
+FIX: دیگر inbound_builder را import نمی‌کند (رفع circular import)؛
+effective_flow از utils می‌آد."""
 
 import base64
 import json
@@ -8,8 +10,7 @@ from urllib.parse import quote
 
 from . import config as cfg
 from . import database as db
-from .utils import load_json, to_int
-from .inbound_builder import effective_flow
+from .utils import load_json, to_int, effective_flow
 
 _LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "::1", "")
 
@@ -30,7 +31,6 @@ def _is_local(h: str) -> bool:
 
 
 def resolve_public_host(request_host=None) -> str:
-    """اولویت: دامنه ثبت‌شده → هدر درخواست → دامنه کش‌شده → IP سرور."""
     dom = (db.get_setting("public_domain") or "").strip()
     if dom:
         dom = dom.replace("https://", "").replace("http://", "")
@@ -58,10 +58,10 @@ def _qs(params: dict) -> str:
 def _conn(g, proto, c, host, paas):
     """پارامترهای مشترک اتصال از دید کلاینت."""
     if paas:
-        # TLS روی پلتفرم خاتمه می‌یابد؛ کلاینت wss به دامنه عمومی می‌زند.
         return {"net": g.get("transport", "ws"), "sec": "tls", "port": 443,
                 "path": g.get("path", "/"), "hh": host, "sni": host,
-                "flow": "", "selfsigned": False}
+                "flow": "", "selfsigned": False,
+                "xhttp_mode": "auto"}
     net = g.get("transport", "tcp")
     sec = g.get("security", "none")
     r = g.get("reality") or {}
@@ -70,7 +70,8 @@ def _conn(g, proto, c, host, paas):
             "path": g.get("path", ""), "hh": g.get("host") or host,
             "sni": sni,
             "flow": effective_flow(c.get("flow"), proto, net, sec),
-            "selfsigned": bool(g.get("selfsigned"))}
+            "selfsigned": bool(g.get("selfsigned")),
+            "xhttp_mode": g.get("xhttpMode") or "auto"}
 
 
 # ---------------- سازنده‌های لینک ----------------
@@ -90,6 +91,9 @@ def _vless(c, host, k, g, name):
     elif k["net"] == "httpupgrade":
         p["path"] = k["path"]
         p["host"] = k["hh"]
+    elif k["net"] == "xhttp":
+        p["path"] = k["path"]
+        p["mode"] = k["xhttp_mode"]
     if k["sec"] == "tls":
         p["sni"] = k["sni"]
         p["alpn"] = g.get("alpn") or "http/1.1"
@@ -109,8 +113,9 @@ def _vmess(c, host, k, g, name):
         "v": "2", "ps": name, "add": host, "port": str(k["port"]),
         "id": c["uuid"], "aid": "0", "scy": "auto",
         "net": k["net"], "type": "none",
-        "host": k["hh"] if k["net"] in ("ws", "httpupgrade") else "",
-        "path": k["path"] if k["net"] in ("ws", "grpc", "httpupgrade") else "",
+        "host": k["hh"] if k["net"] in ("ws", "httpupgrade", "xhttp") else "",
+        "path": k["path"] if k["net"] in ("ws", "grpc", "httpupgrade",
+                                          "xhttp") else "",
         "tls": "tls" if k["sec"] in ("tls", "reality") else "",
         "sni": k["sni"] if k["sec"] != "none" else "",
         "alpn": g.get("alpn") or "",
@@ -132,6 +137,9 @@ def _trojan(c, host, k, name):
     elif k["net"] == "httpupgrade":
         p["path"] = k["path"]
         p["host"] = k["hh"]
+    elif k["net"] == "xhttp":
+        p["path"] = k["path"]
+        p["mode"] = k["xhttp_mode"]
     if k["sec"] != "none":
         p["sni"] = k["sni"]
         if k["selfsigned"]:
@@ -150,7 +158,7 @@ def _ss(c, host, k, g, name):
 # ---------------- API عمومی ----------------
 
 def client_links(c, host=None, paas=None):
-    """همه لینک‌های یک کلاینت → [{'name','link','protocol','inbound_id'}]"""
+    """همه لینک‌های یک کلاینت → [{'name','link','protocol',...}]"""
     paas = cfg.PAAS if paas is None else paas
     host = host or resolve_public_host()
     own = load_json(c["inbounds"], [])
@@ -171,7 +179,8 @@ def client_links(c, host=None, paas=None):
         else:
             link = _ss(c, host, k, g, name)
         out.append({"name": name, "link": link, "protocol": proto,
-                    "inbound_id": ib["id"], "remark": ib["remark"] or ""})
+                    "inbound_id": ib["id"],
+                    "remark": ib["remark"] or ""})
     return out
 
 
