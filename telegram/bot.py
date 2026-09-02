@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""SF-Shop Bot — هسته ربات فروش (v2 اصلاح‌شده)
-FIX: TOKEN_RE ($$ اضافه) · شکستن import چرخشی با import داخل تابع
-وابستگی‌های بخش ۴/۵ اختیاری — اگر نبودند پیام مناسب می‌دهد (نه کرش).
+"""SF-Shop Bot v3
+FIX1: کوپن هنگام کلیک پرداخت پاک نمی‌شود
+FIX2: answer_cbq برای shop:*
+FIX3: ثبت username تلگرام
 """
 
 import re
@@ -13,11 +14,11 @@ import traceback
 import requests
 
 from core import config as cfg
-from core import database as db            # دیتابیس پنل
+from core import database as db
 from core.utils import fmt_bytes, load_json
 from core.link_builder import client_links, resolve_public_host
 
-from . import db as sdb                    # دیتابیس فروش (shop.db)
+from . import db as sdb
 from . import texts
 from . import panel_link
 
@@ -25,12 +26,9 @@ API_TIMEOUT = 35
 MSG_MAX = 4000
 BIND_CODE_RE = re.compile(r"^[A-Za-z0-9_\-]{6,64}$")
 TOKEN_RE = re.compile(r"^\d+:[\w\-]{30,}$")
-START_TS = time.time()
 
-_states = {}   # tg_id → {"step": ..., "data": {...}}
+_states = {}
 
-
-# ================================================== ابزار
 
 def now_ms() -> int:
     return int(time.time() * 1000)
@@ -64,11 +62,9 @@ def send_message(chat_id, text, reply_markup=None, parse_mode="HTML"):
     parts = [text[i:i + MSG_MAX] for i in range(0, len(text), MSG_MAX)]
     try:
         for i, part in enumerate(parts):
-            payload = {
-                "chat_id": chat_id, "text": part,
-                "parse_mode": parse_mode,
-                "disable_web_page_preview": True,
-            }
+            payload = {"chat_id": chat_id, "text": part,
+                       "parse_mode": parse_mode,
+                       "disable_web_page_preview": True}
             if reply_markup and i == len(parts) - 1:
                 payload["reply_markup"] = reply_markup
             r = requests.post(url, json=payload, timeout=API_TIMEOUT)
@@ -101,8 +97,7 @@ def forward_photo_or_file(chat_id, from_chat_id, message_id):
         requests.post(
             f"https://api.telegram.org/bot{token}/forwardMessage",
             json={"chat_id": chat_id, "from_chat_id": from_chat_id,
-                  "message_id": message_id},
-            timeout=API_TIMEOUT)
+                  "message_id": message_id}, timeout=API_TIMEOUT)
     except Exception:
         pass
 
@@ -140,7 +135,7 @@ def _bot_username():
 # ================================================== کیبوردها
 
 def main_kb(role="user"):
-    rows = [
+    return {"inline_keyboard": [
         [{"text": "🛒 خرید اشتراک", "callback_data": "shop"},
          {"text": "📋 اشتراک‌های من", "callback_data": "mysubs"}],
         [{"text": "👤 پروفایل", "callback_data": "profile"},
@@ -149,8 +144,7 @@ def main_kb(role="user"):
          {"text": "🤝 کسب درآمد", "callback_data": "referral"}],
         [{"text": "🏪 نمایندگی", "callback_data": "agent"},
          {"text": "💬 پشتیبانی", "callback_data": "support"}],
-    ]
-    return {"inline_keyboard": rows}
+    ]}
 
 
 def back_kb():
@@ -160,15 +154,13 @@ def back_kb():
 
 # ================================================== دستورات
 
-def cmd_start(chat, args):
+def cmd_start(chat, args, username=""):
     tg = int(chat)
     _states.pop(tg, None)
-    u = sdb.ensure_user(tg, args[1] if len(args) > 1 else "")
+    u = sdb.ensure_user(tg, username)
     if u["is_blocked"]:
         send_message(chat, texts.T["blocked"])
         return
-
-    # ریفرال
     if args:
         code = args[0].strip()
         if re.match(r"^r[0-9a-f]{6}$", code) and not u["ref_by"]:
@@ -177,7 +169,6 @@ def cmd_start(chat, args):
             if inviter and inviter["tg_id"] != tg:
                 sdb.ex("UPDATE users SET ref_by=? WHERE tg_id=?",
                        (inviter["tg_id"], tg))
-
     title = sdb.get_setting("shop_title", "SF VPN Shop")
     send_message(chat, texts.T["welcome"].format(
         title=esc(title), uid=chat), reply_markup=main_kb())
@@ -185,14 +176,12 @@ def cmd_start(chat, args):
 
 def cmd_help(chat, args):
     role = get_role(int(chat))
-    lines = [
-        "📖 <b>راهنما</b>", "",
-        "🛒 خرید اشتراک از منوی اصلی",
-        "💳 شارژ کیف پول با ارسال رسید",
-        "🎁 اکانت تست رایگان",
-        "🤝 دعوت دوستان = پاداش",
-        "💬 /start → بازگشت به منو",
-    ]
+    lines = ["📖 <b>راهنما</b>", "",
+             "🛒 خرید اشتراک از منوی اصلی",
+             "💳 شارژ کیف پول با ارسال رسید",
+             "🎁 اکانت تست رایگان",
+             "🤝 دعوت دوستان = پاداش",
+             "💬 /start → بازگشت به منو"]
     if role in ("owner", "admin"):
         lines += ["", "👑 /panel → پنل مدیریت"]
     send_message(chat, "\n".join(lines))
@@ -202,8 +191,8 @@ def cmd_bind(chat, args):
     if not args:
         send_message(chat, "❌ صحیح: <code>/bind کد-اتصال</code>")
         return
-    code = args[0].strip()
-    c = db.q("SELECT * FROM clients WHERE sub_id=?", (code,), one=True)
+    c = db.q("SELECT * FROM clients WHERE sub_id=?",
+             (args[0].strip(),), one=True)
     if not c:
         send_message(chat, "❌ کد اتصال معتبر نیست.")
         return
@@ -211,7 +200,6 @@ def cmd_bind(chat, args):
         send_message(chat, "❌ این کانفیگ به تلگرام دیگری متصل است.")
         return
     db.ex("UPDATE clients SET tg_id=? WHERE id=?", (chat, c["id"]))
-    db.log_event(f"کاربر «{c['email']}» به تلگرام متصل شد", "ok")
     send_message(chat, f"✅ کانفیگ <b>{esc(c['email'])}</b> متصل شد!")
 
 
@@ -238,11 +226,11 @@ def cb_profile(chat):
 
 def cb_mysubs(chat):
     tg = int(chat)
-    accs = sdb.q("SELECT * FROM bot_accounts WHERE user_id=? ORDER BY id DESC",
-                 (tg,))
+    accs = sdb.q("SELECT * FROM bot_accounts WHERE user_id=? "
+                 "ORDER BY id DESC", (tg,))
     if not accs:
-        send_message(chat, "هنوز اشتراکی نخریده‌ای. از «🛒 خرید اشتراک» شروع کن.",
-                     reply_markup=main_kb())
+        send_message(chat, "هنوز اشتراکی نخریده‌ای. از «🛒 خرید اشتراک» "
+                           "شروع کن.", reply_markup=main_kb())
         return
     base = base_url()
     items = []
@@ -250,13 +238,11 @@ def cb_mysubs(chat):
         info = panel_link.account_info(a["sub_id"])
         if not info:
             continue
-        if not info["enable"]:
-            status = "⛔"
-        elif info["expiry"] and info["expiry"] < now_ms():
-            status = "❌ منقضی"
-        else:
-            status = "✅"
-        exp = (time.strftime("%Y-%m-%d", time.localtime(info["expiry"] / 1000))
+        status = ("⛔" if not info["enable"] else
+                  "❌ منقضی" if info["expiry"] and info["expiry"] < now_ms()
+                  else "✅")
+        exp = (time.strftime("%Y-%m-%d",
+                             time.localtime(info["expiry"] / 1000))
                if info["expiry"] else "∞")
         items.append(texts.T["sub_item"].format(
             email=esc(a["email"]), status=status,
@@ -275,12 +261,11 @@ def handle_callback(cbq):
     cbq_id = str(cbq.get("id", ""))
     if not chat or not data:
         return
-
     u = sdb.q("SELECT * FROM users WHERE tg_id=?", (int(chat),), one=True)
     if u and u["is_blocked"]:
         answer_cbq(cbq_id, "⛔ مسدود")
         return
-    _states.pop(int(chat), None)
+    # FIX1: state پاک نمی‌شود — کوپن تا لحظه پرداخت زنده می‌ماند
 
     if data == "menu":
         answer_cbq(cbq_id)
@@ -307,6 +292,7 @@ def handle_callback(cbq):
     elif data.startswith("shop:"):
         try:
             from .handlers_shop import route_callback
+            answer_cbq(cbq_id)          # FIX2
             route_callback(data, chat, cbq)
         except ImportError:
             answer_cbq(cbq_id, "این بخش نصب نشده")
@@ -345,13 +331,12 @@ def cmd_status(chat, args):
     if not _require_admin(chat):
         return
     xs = _xray().state()
-    totals = db.q(
-        "SELECT COALESCE(SUM(up),0) AS u, COALESCE(SUM(down),0) AS d, "
-        "COUNT(*) AS n, COALESCE(SUM(enable),0) AS e FROM clients",
-        one=True)
+    totals = db.q("SELECT COALESCE(SUM(up),0) u, COALESCE(SUM(down),0) d, "
+                  "COUNT(*) n, COALESCE(SUM(enable),0) e FROM clients",
+                  one=True)
     day = time.strftime("%Y-%m-%d", time.gmtime())
-    daily = db.q("SELECT * FROM daily_totals WHERE day=?", (day,), one=True) \
-        or {"up": 0, "down": 0}
+    daily = db.q("SELECT * FROM daily_totals WHERE day=?",
+                 (day,), one=True) or {"up": 0, "down": 0}
     send_message(chat, (
         f"🖥 <b>{esc(cfg.APP_NAME)}</b>\n"
         f"├ Xray: {'✅' if xs['running'] else '❌'} "
@@ -366,9 +351,8 @@ def cmd_status(chat, args):
 def cmd_clients(chat, args):
     if not _require_admin(chat):
         return
-    rows = db.q("SELECT * FROM clients ORDER BY id DESC LIMIT 50")
     msg = "👥 <b>کاربران پنل</b> (۵۰ آخر)\n"
-    for c in rows:
+    for c in db.q("SELECT * FROM clients ORDER BY id DESC LIMIT 50"):
         used = c["up"] + c["down"]
         extra = (f" ({int(used * 100 / c['limit_bytes'])}%)"
                  if c["limit_bytes"] else "")
@@ -380,16 +364,13 @@ def cmd_clients(chat, args):
 def cmd_inbounds(chat, args):
     if not _require_admin(chat):
         return
-    rows = db.q("SELECT * FROM inbounds ORDER BY id")
     clients = db.q("SELECT inbounds FROM clients")
     msg = "📡 <b>اینباند‌ها</b>\n"
-    for ib in rows:
+    for ib in db.q("SELECT * FROM inbounds ORDER BY id"):
         g = load_json(ib["config"], {})
-        if cfg.PAAS:
-            detail = f"wss://{esc(g.get('path', ''))}"
-        else:
-            detail = (f"پورت {g.get('port', '?')} • "
-                      f"{g.get('transport', 'tcp')}/{g.get('security', 'none')}")
+        detail = (f"wss://{esc(g.get('path', ''))}" if cfg.PAAS else
+                  f"پورت {g.get('port', '?')} • "
+                  f"{g.get('transport', 'tcp')}/{g.get('security', 'none')}")
         cnt = sum(1 for c in clients
                   if ib["id"] in load_json(c["inbounds"], []))
         msg += (f"\n#{ib['id']} <b>{esc(ib['remark'])}</b> "
@@ -438,7 +419,7 @@ def cmd_panel(chat):
 
 # ================================================== پیام متنی
 
-def route_message(chat: str, text: str):
+def route_message(chat: str, text: str, username: str = ""):
     tg = int(chat)
     u = sdb.q("SELECT * FROM users WHERE tg_id=?", (tg,), one=True)
     if u and u["is_blocked"]:
@@ -448,7 +429,6 @@ def route_message(chat: str, text: str):
     low = text.split("@", 1)[0].lower()
     parts = text.split()
 
-    # FSM — import داخل تابع (ضد چرخش)
     if tg in _states:
         try:
             from .handlers_fsm import route_fsm
@@ -470,18 +450,22 @@ def route_message(chat: str, text: str):
 
     cmd = low.split("@")[0]
     args = parts[1:]
-    ROUTES = {
-        "/start": cmd_start, "/help": cmd_help,
-        "/status": cmd_status, "/clients": cmd_clients,
-        "/inbounds": cmd_inbounds, "/restart": cmd_restart,
-        "/notify": cmd_notify, "/panel": cmd_panel,
-    }
+
+    if cmd == "/start":
+        cmd_start(chat, args, username)      # FIX3
+        return
+    if cmd == "/cancel":
+        _states.pop(tg, None)
+        send_message(chat, texts.T["cancelled"], reply_markup=main_kb())
+        return
+
+    ROUTES = {"/help": cmd_help, "/status": cmd_status,
+              "/clients": cmd_clients, "/inbounds": cmd_inbounds,
+              "/restart": cmd_restart, "/notify": cmd_notify,
+              "/panel": cmd_panel}
     handler = ROUTES.get(cmd)
     if handler:
         handler(chat, args)
-    elif cmd == "/cancel":
-        _states.pop(tg, None)
-        send_message(chat, texts.T["cancelled"], reply_markup=main_kb())
     else:
         send_message(chat, "دستور ناشناخته. /help")
 
@@ -553,8 +537,9 @@ class BotPoller(threading.Thread):
         msg = upd.get("message") or upd.get("edited_message") or {}
         chat = str(msg.get("chat", {}).get("id", ""))
         text = (msg.get("text") or "").strip()
+        username = ((msg.get("from") or {}).get("username") or "")  # FIX3
         if chat and text:
-            route_message(chat, text)
+            route_message(chat, text, username)
             return
         if chat and (msg.get("photo") or msg.get("document")):
             try:
@@ -570,7 +555,6 @@ _poller = None
 
 
 def start_bot():
-    """از app.py صدا زده می‌شود."""
     global _poller
     try:
         sdb.connect()
