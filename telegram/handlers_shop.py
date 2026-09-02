@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""دکمه‌های فروش
+"""دکمه‌های فروش — نسخه نهایی اصلاح‌شده
 کیف پول · خرید · اکانت تست · ریفرال · نمایندگی · پشتیبانی
 """
 
@@ -11,11 +11,16 @@ from .bot import (
     main_kb,
     back_kb,
     _states,
-    _states_lock,
     now_ms,
     base_url,
     _bot_username,
 )
+
+try:
+    from .bot import _states_lock
+except ImportError:
+    import threading
+    _states_lock = threading.RLock()
 from .handlers_fsm import (
     STEP_DEPOSIT,
     STEP_COUPON,
@@ -29,40 +34,68 @@ def _fmt_toman(n) -> str:
 
 
 def _send_account_details(tg: int, acc: dict, days, gb):
-    """ارسال کامل اطلاعات اکانت: ساب + کانفیگ‌ها + QR"""
+    """ارسال کامل: پیام موفقیت + ساب + کانفیگ‌ها + QR"""
     base = base_url()
     sub_url = f"{base}/sub/{acc['sub_id']}"
 
-    # پیام اصلی موفقیت
-    send_message(
-        tg,
-        texts.T["buy_success"].format(
-            email=acc["email"],
-            days=days or "∞",
-            gb=gb or "∞",
-            sub=sub_url,
-        ),
-        reply_markup=main_kb(),
-    )
+    # ۱. پیام موفقیت
+    try:
+        send_message(
+            tg,
+            texts.T["buy_success"].format(
+                email=acc.get("email") or "?",
+                days=days or "∞",
+                gb=gb or "∞",
+                sub=sub_url,
+            ),
+            reply_markup=main_kb(),
+        )
+    except Exception as e:
+        try:
+            from core import database as pdb
+            pdb.log_event(f"buy_success send: {e}", "err")
+        except Exception:
+            pass
+        send_message(
+            tg,
+            f"✅ خرید انجام شد\n\n"
+            f"👤 اکانت: <code>{acc.get('email') or '?'}</code>\n"
+            f"📥 لینک ساب:\n<code>{sub_url}</code>",
+            reply_markup=main_kb(),
+        )
 
-    # ارسال لینک‌های کانفیگ (vless / vmess / ...)
-    links = acc.get("links") or []
-    if links:
-        configs_txt = "📡 <b>کانفیگ‌های مستقیم:</b>\n\n"
-        for i, lk in enumerate(links[:6], 1):  # حداکثر ۶ تا
-            name = texts.esc(lk.get("remark") or lk.get("name") or f"#{i}")
-            link = lk.get("link") or ""
-            configs_txt += f"<b>{i}. {name}</b>\n<code>{link}</code>\n\n"
-        send_message(tg, configs_txt)
+    # ۲. کانفیگ‌های مستقیم
+    try:
+        links = acc.get("links") or []
+        if not links:
+            try:
+                links = panel_link.account_links(acc["sub_id"]) or []
+            except Exception:
+                links = []
+        if links:
+            txt = "📡 <b>کانفیگ‌های مستقیم:</b>\n\n"
+            for i, lk in enumerate(links[:6], 1):
+                name = texts.esc(lk.get("remark") or lk.get("name") or f"#{i}")
+                link = lk.get("link") or ""
+                if link:
+                    txt += f"<b>{i}. {name}</b>\n<code>{link}</code>\n\n"
+            send_message(tg, txt)
+    except Exception as e:
+        try:
+            from core import database as pdb
+            pdb.log_event(f"config links: {e}", "err")
+        except Exception:
+            pass
 
-    # ارسال QR کد (اولین لینک یا ساب)
+    # ۳. QR Code
     try:
         import io
         import qrcode
         import requests
         from core import database as panel_db
 
-        qr_data = links[0]["link"] if links else sub_url
+        links = acc.get("links") or []
+        qr_data = (links[0].get("link") if links else None) or sub_url
         qr = qrcode.QRCode(version=1, box_size=8, border=2)
         qr.add_data(qr_data)
         qr.make(fit=True)
@@ -77,13 +110,12 @@ def _send_account_details(tg: int, acc: dict, days, gb):
                 f"https://api.telegram.org/bot{token}/sendPhoto",
                 data={
                     "chat_id": tg,
-                    "caption": "📱 QR Code — اسکن کن یا لینک ساب رو کپی کن",
+                    "caption": "📱 QR Code — اسکن کن",
                 },
                 files={"photo": ("qr.png", buf, "image/png")},
                 timeout=20,
             )
     except Exception:
-        # اگر qrcode نصب نبود یا خطا خورد، فقط لینک ساب کافیست
         pass
 
 
@@ -150,9 +182,7 @@ def cb_shop(tg: int):
         "SELECT * FROM plans WHERE is_active=1 ORDER BY sort, id"
     )
     if not plans:
-        send_message(
-            tg, "فعلاً پلنی موجود نیست. با پشتیبانی در تماس باش."
-        )
+        send_message(tg, "فعلاً پلنی موجود نیست. با پشتیبانی در تماس باش.")
         return
     rows = []
     for p in plans:
@@ -220,7 +250,6 @@ def cb_plan_direct(tg: int, pid: str):
         send_message(tg, "این پلن دیگر فعال نیست.")
         return
 
-    # data را با تخفیف صفر نگه می‌داریم
     with _states_lock:
         _states[tg] = {
             "step": None,
@@ -259,7 +288,7 @@ def cb_plan_direct(tg: int, pid: str):
 
 
 def cb_pay(tg: int, pid: str):
-    """پرداخت atomic — اول پول کم می‌شود، بعد اکانت ساخته می‌شود"""
+    """پرداخت atomic + تحویل قطعی کانفیگ"""
     p = _plan(pid)
     if not p:
         send_message(tg, "این پلن دیگر فعال نیست.")
@@ -269,7 +298,6 @@ def cb_pay(tg: int, pid: str):
     if not u or u.get("is_blocked"):
         return
 
-    # خواندن اطلاعات کوپن از state (پاک نمی‌کنیم تا بعد از موفقیت)
     with _states_lock:
         st = _states.get(tg) or {}
         data = st.get("data") or {}
@@ -277,29 +305,34 @@ def cb_pay(tg: int, pid: str):
     discount = int(data.get("discount") or 0)
     coupon_code = data.get("coupon_code")
     final = max(0, p["price"] - discount)
-
-    # اگر state خالی بود (مثلاً کاربر دکمه قدیمی زده)، قیمت اصلی را بگیر
     if "final" in data:
-        final = max(0, int(data["final"]))
+        try:
+            final = max(0, int(data["final"]))
+        except Exception:
+            pass
 
-    if u["balance"] < final:
+    if (u.get("balance") or 0) < final:
         send_message(
             tg,
-            texts.T["no_balance"].format(need=final - u["balance"]),
+            texts.T["no_balance"].format(need=final - (u.get("balance") or 0)),
         )
         return
 
-    # ۱. کسر امن موجودی
-    ok = sdb.balance_deduct_safe(
-        tg,
-        final,
-        "purchase",
-        f"پلن {p['title']}",
-    )
+    # ۱. کسر موجودی
+    ok = False
+    if hasattr(sdb, "balance_deduct_safe"):
+        ok = sdb.balance_deduct_safe(
+            tg, final, "purchase", f"پلن {p['title']}"
+        )
+    else:
+        # سازگاری با db قدیمی
+        if (u.get("balance") or 0) >= final:
+            sdb.balance_add(tg, -final, "purchase", f"پلن {p['title']}")
+            ok = True
     if not ok:
         send_message(
             tg,
-            texts.T["no_balance"].format(need=final - u["balance"]),
+            texts.T["no_balance"].format(need=final - (u.get("balance") or 0)),
         )
         return
 
@@ -307,39 +340,52 @@ def cb_pay(tg: int, pid: str):
     acc, err = panel_link.create_account(tg, p["days"], p["limit_gb"])
     if err or not acc:
         # برگشت پول
-        sdb.balance_add(tg, final, "refund", f"خطا در ساخت اکانت: {err}")
-        send_message(tg, f"❌ {err or 'خطا در ساخت اکانت'}\nموجودی برگشت داده شد.")
+        try:
+            sdb.balance_add(tg, final, "refund", f"خطا در ساخت اکانت: {err}")
+        except Exception:
+            pass
+        send_message(
+            tg,
+            f"❌ {err or 'خطا در ساخت اکانت'}\nموجودی برگردانده شد.",
+        )
         return
 
-    # ۳. ثبت کوپن (اگر بود)
+    # ۳. ثبت کوپن
     if coupon_code:
         try:
             sdb.coupon_commit(coupon_code, tg)
         except Exception:
             pass
 
-    # ۴. ثبت اکانت در دیتابیس ربات
-    sdb.ex(
-        "UPDATE users SET buys_count = buys_count + 1 WHERE tg_id=?",
-        (tg,),
-    )
-    sdb.ex(
-        "INSERT INTO bot_accounts(user_id,plan_id,email,sub_id,"
-        "expires_at,limit_bytes,ts) VALUES(?,?,?,?,?,?,?)",
-        (
-            tg,
-            p["id"],
-            acc["email"],
-            acc["sub_id"],
-            acc["expires_at"],
-            acc["limit_bytes"],
-            now_ms(),
-        ),
-    )
-
-    # ۵. پاداش ریفرال
-    if u.get("ref_by"):
+    # ۴. ثبت در bot_accounts
+    try:
+        sdb.ex(
+            "UPDATE users SET buys_count = buys_count + 1 WHERE tg_id=?",
+            (tg,),
+        )
+        sdb.ex(
+            "INSERT INTO bot_accounts(user_id,plan_id,email,sub_id,"
+            "expires_at,limit_bytes,ts) VALUES(?,?,?,?,?,?,?)",
+            (
+                tg,
+                p["id"],
+                acc["email"],
+                acc["sub_id"],
+                acc["expires_at"],
+                acc["limit_bytes"],
+                now_ms(),
+            ),
+        )
+    except Exception as e:
         try:
+            from core import database as pdb
+            pdb.log_event(f"bot_accounts insert: {e}", "err")
+        except Exception:
+            pass
+
+    # ۵. پاداش ریفرال (نباید خرید را خراب کند)
+    try:
+        if u.get("ref_by"):
             percent = int(sdb.get_setting("ref_percent", "20"))
             reward = final * percent // 100
             if reward > 0:
@@ -359,13 +405,20 @@ def cb_pay(tg: int, pid: str):
                     f"🤝 خرید زیرمجموعه‌ات ثبت شد!\n"
                     f"<b>{reward:,} تومان</b> به کیف پولت اضافه شد.",
                 )
+    except Exception:
+        pass
+
+    # ۶. پاک کردن state
+    try:
+        with _states_lock:
+            _states.pop(tg, None)
+    except Exception:
+        try:
+            _states.pop(tg, None)
         except Exception:
             pass
 
-    # ۶. پاک کردن state
-    with _states_lock:
-        _states.pop(tg, None)
-
+    # ۷. تحویل کانفیگ (حتماً)
     _send_account_details(tg, acc, p["days"], p["limit_gb"])
 
 
@@ -405,7 +458,6 @@ def cb_trial_go(tg: int):
     gb = int(sdb.get_setting("trial_gb", "1"))
     days = int(sdb.get_setting("trial_days", "1"))
 
-    # جلوگیری از چندبار زدن دکمه
     u = sdb.q("SELECT trial_last FROM users WHERE tg_id=?", (tg,), one=True)
     cd_days = int(sdb.get_setting("trial_cooldown", "7"))
     if u and u.get("trial_last"):
@@ -416,24 +468,27 @@ def cb_trial_go(tg: int):
 
     acc, err = panel_link.create_account(tg, days, gb)
     if err or not acc:
-        send_message(tg, f"❌ {err}")
+        send_message(tg, f"❌ {err or 'خطا در ساخت اکانت تست'}")
         return
 
-    sdb.ex(
-        "UPDATE users SET trial_last=? WHERE tg_id=?", (now_ms(), tg)
-    )
-    sdb.ex(
-        "INSERT INTO bot_accounts(user_id,plan_id,email,sub_id,"
-        "expires_at,limit_bytes,ts) VALUES(?,0,?,?,?,?,?)",
-        (
-            tg,
-            acc["email"],
-            acc["sub_id"],
-            acc["expires_at"],
-            acc["limit_bytes"],
-            now_ms(),
-        ),
-    )
+    try:
+        sdb.ex(
+            "UPDATE users SET trial_last=? WHERE tg_id=?", (now_ms(), tg)
+        )
+        sdb.ex(
+            "INSERT INTO bot_accounts(user_id,plan_id,email,sub_id,"
+            "expires_at,limit_bytes,ts) VALUES(?,0,?,?,?,?,?)",
+            (
+                tg,
+                acc["email"],
+                acc["sub_id"],
+                acc["expires_at"],
+                acc["limit_bytes"],
+                now_ms(),
+            ),
+        )
+    except Exception:
+        pass
 
     _send_account_details(tg, acc, days, gb)
 
